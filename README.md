@@ -7,9 +7,31 @@
 
 ## Instalação — escolha seu sistema
 
-### Windows 10/11 (PowerShell como Administrador)
+### 👍 Opção 1: Windows Nativo (recomendado)
+
+**Roda tudo diretamente no Windows, sem WSL.**
 
 ```powershell
+# PowerShell como Administrador
+irm https://raw.githubusercontent.com/edson-guillen/setup-gq-oc/main/bootstrap/windows-native.ps1 | iex
+```
+
+O script:
+1. Instala Node.js LTS via winget
+2. Instala Bun (runtime JavaScript nativo Windows)
+3. Instala gqwen-auth + OpenClaude
+4. Configura variáveis de ambiente permanentemente
+5. Cria os comandos `qoc-start`, `qoc-stop`, `qoc-status` e `qoc-doctor` no PowerShell
+6. Abre o browser **só para o login OAuth no qwen.ai** (inevitável)
+
+---
+
+### 👎 Opção 2: Windows com WSL2
+
+**Instala WSL2 + Ubuntu automaticamente e roda tudo no Linux.**
+
+```powershell
+# PowerShell como Administrador
 irm https://raw.githubusercontent.com/edson-guillen/setup-gq-oc/main/bootstrap/windows.ps1 | iex
 ```
 
@@ -23,6 +45,8 @@ O script:
 7. Abre o browser **só para o login OAuth no qwen.ai** (inevitável)
 
 > Se precisar reiniciar para ativar WSL2, o script agenda a retomada automática após o reboot.
+
+---
 
 ### Linux / macOS / WSL2
 
@@ -49,7 +73,8 @@ qoc-doctor                   # diagnóstico completo do ambiente
 ```
 setup-gq-oc/
 ├── bootstrap/
-│   └── windows.ps1      # Ponto de entrada Windows: WSL2 + Ubuntu + setup automático
+│   ├── windows-native.ps1   # Windows nativo (recomendado)
+│   └── windows.ps1          # Windows + WSL2 + Ubuntu
 ├── scripts/
 │   ├── install.sh       # Instala tudo (idempotente) — Linux/macOS/WSL
 │   ├── first-run.sh     # Valida auth, cria .env, liga proxy, testa endpoint
@@ -72,6 +97,13 @@ setup-gq-oc/
 | `coder-model` | Modelo geral de código |
 
 Para trocar de modelo:
+
+**Windows (PowerShell)**:
+```powershell
+$env:OPENAI_MODEL="qwen3-coder-flash"
+```
+
+**Linux/macOS**:
 ```bash
 export OPENAI_MODEL=qwen3-coder-flash
 ```
@@ -96,11 +128,28 @@ export OPENAI_MODEL=qwen3-coder-flash
 
 ## Decisões técnicas
 
+- **Windows nativo é a opção recomendada**: Bun e Node.js funcionam perfeitamente no Windows moderno, sem overhead do WSL
 - **Sem `set -u`** em todos os scripts bash: instaladores externos (Bun, nvm) usam variáveis internas que quebram com `unset variable`
-- **Node.js via NodeSource apt**: nunca via nvm em scripts não-interativos
+- **Node.js via NodeSource apt** (Linux) ou **winget** (Windows): nunca via nvm em scripts não-interativos
 - **Script bash passado ao WSL via `/tmp/`**: evita problemas de escape de aspas e here-strings no PowerShell
 - **Idempotente**: rodar duas vezes não causa erros nem reinstala o que já existe
 - **Detecção robusta de distro**: trata UTF-16 e nomes variados (Ubuntu, Ubuntu-24.04, etc.)
+- **Variáveis de ambiente permanentes**: configuradas no nível do usuário (Windows) ou no `.bashrc`/`.zshrc` (Linux/macOS)
+
+---
+
+## Comparação: Windows Nativo vs WSL2
+
+| | Windows Nativo | WSL2 |
+|---|---|---|
+| **Performance** | ⚡ Máxima (I/O nativo) | ✅ Boa (overhead leve) |
+| **Compatibilidade** | ✅ Win10 build 10240+ | ✅ Win10 build 19041+ |
+| **Espaço em disco** | ⚡ ~500MB | 📦 ~2GB (Ubuntu + deps) |
+| **Tempo de setup** | ⚡ 2-3 min | ⏱️ 5-8 min (instala WSL) |
+| **Acesso a arquivos** | ⚡ Direto (`C:\\`) | 🔄 Via `/mnt/c` |
+| **Ferramentas Linux** | ❌ Não disponíveis | ✅ Acesso total |
+
+👉 **Recomendação**: Use **Windows Nativo** a menos que precise de ferramentas Linux específicas.
 
 ---
 
