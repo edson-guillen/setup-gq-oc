@@ -31,6 +31,23 @@ function Write-Banner {
 Write-Banner
 
 # -------------------------------------------------------
+# Função: resolver nome real da distro Ubuntu no WSL
+# Retorna o nome exato registrado (ex: Ubuntu, Ubuntu-24.04, Ubuntu-22.04)
+# -------------------------------------------------------
+function Get-UbuntuDistroName {
+    try {
+        # wsl --list --quiet retorna nomes com possíveis caracteres nulos (UTF-16)
+        $rawList = wsl --list --quiet 2>&1
+        $names = $rawList | ForEach-Object {
+            # Remover caracteres nulos e espaços que WSL insere
+            ($_ -replace "`0", "").Trim()
+        } | Where-Object { $_ -ne "" -and $_ -match "Ubuntu" }
+        if ($names) { return ($names | Select-Object -First 1) }
+    } catch {}
+    return $null
+}
+
+# -------------------------------------------------------
 # 1. Verificar privilégios de Administrador
 # -------------------------------------------------------
 Write-Step "Verificando privilégios..."
@@ -64,7 +81,7 @@ Write-Ok "$winVer (build $build) — compatível."
 Write-Step "Verificando WSL2..."
 $wslInstalled = $false
 try {
-    $wslVersion = wsl --status 2>&1
+    $null = wsl --status 2>&1
     if ($LASTEXITCODE -eq 0) { $wslInstalled = $true }
 } catch { $wslInstalled = $false }
 
@@ -72,34 +89,27 @@ if (-not $wslInstalled) {
     Write-Warn "WSL2 não encontrado. Instalando..."
     Write-Host "  Isso pode levar alguns minutos..." -ForegroundColor Yellow
 
-    # Habilitar features necessárias
     dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart | Out-Null
     dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart | Out-Null
 
-    # Instalar WSL2 via winget (Windows 11) ou download direto (Windows 10)
     $wslInstallSuccess = $false
     if (Get-Command winget -ErrorAction SilentlyContinue) {
         winget install --id Microsoft.WSL --accept-package-agreements --accept-source-agreements -e 2>$null
         if ($LASTEXITCODE -eq 0) { $wslInstallSuccess = $true }
     }
-
     if (-not $wslInstallSuccess) {
-        Write-Warn "Instalando via wsl --install..."
         wsl --install --no-distribution 2>&1 | Out-Null
     }
 
-    # Definir WSL2 como padrão
     wsl --set-default-version 2 2>&1 | Out-Null
-
     Write-Ok "WSL2 instalado."
     Write-Warn "ATENÇÃO: Pode ser necessário reiniciar o computador."
     Write-Host ""
     $reboot = Read-Host "  Reiniciar agora para ativar WSL2? [S/n]"
     if ($reboot -ne 'n' -and $reboot -ne 'N') {
-        # Criar task scheduled para continuar após reboot
         $scriptUrl = "https://raw.githubusercontent.com/edson-guillen/setup-gq-oc/main/bootstrap/windows.ps1"
         $action = New-ScheduledTaskAction -Execute 'PowerShell.exe' `
-            -Argument "-NoProfile -ExecutionPolicy Bypass -Command \"irm $scriptUrl | iex\""
+            -Argument "-NoProfile -ExecutionPolicy Bypass -Command `"irm $scriptUrl | iex`""
         $trigger = New-ScheduledTaskTrigger -AtLogOn
         $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -RunLevel Highest
         Register-ScheduledTask -TaskName 'setup-gq-oc-resume' -Action $action `
@@ -114,86 +124,141 @@ if (-not $wslInstalled) {
 Write-Ok "WSL2 disponível."
 
 # -------------------------------------------------------
-# 4. Verificar/instalar Ubuntu
+# 4. Verificar/instalar Ubuntu e resolver nome da distro
 # -------------------------------------------------------
 Write-Step "Verificando Ubuntu no WSL..."
-$distros = wsl --list --quiet 2>&1 | Where-Object { $_ -match 'Ubuntu' }
+$distroName = Get-UbuntuDistroName
 
-if (-not $distros) {
-    Write-Warn "Ubuntu não encontrado. Instalando Ubuntu 24.04..."
-    $ubuntuInstalled = $false
+if (-not $distroName) {
+    Write-Warn "Ubuntu não encontrado. Instalando via wsl --install..."
 
-    # Tentar via winget primeiro
-    if (Get-Command winget -ErrorAction SilentlyContinue) {
-        winget install --id Canonical.Ubuntu.2404 --accept-package-agreements --accept-source-agreements -e 2>$null
-        if ($LASTEXITCODE -eq 0) { $ubuntuInstalled = $true }
+    # Estratégia 1: wsl --install (mais confiável para registrar no WSL)
+    $installOk = $false
+    try {
+        # Tenta instalar silenciosamente; pode abrir janela de inicialização
+        $proc = Start-Process -FilePath "wsl.exe" -ArgumentList "--install -d Ubuntu" `
+            -PassThru -WindowStyle Normal
+        Write-Host "  Instalando Ubuntu... aguarde (pode abrir uma janela)." -ForegroundColor Yellow
+        # Aguarda até 3 min
+        $proc.WaitForExit(180000) | Out-Null
+        $installOk = $true
+    } catch {
+        $installOk = $false
     }
 
-    # Fallback: wsl --install
-    if (-not $ubuntuInstalled) {
-        wsl --install -d Ubuntu 2>&1 | Out-Null
-        $ubuntuInstalled = $true
+    # Estratégia 2: winget como fallback
+    if (-not $installOk -or -not (Get-UbuntuDistroName)) {
+        if (Get-Command winget -ErrorAction SilentlyContinue) {
+            Write-Warn "Tentando via winget..."
+            winget install --id Canonical.Ubuntu.2404 --accept-package-agreements --accept-source-agreements -e 2>$null
+        }
     }
 
-    Write-Ok "Ubuntu instalado."
-    Write-Warn "Aguardando Ubuntu inicializar (primeira execução)..."
-    Start-Sleep -Seconds 5
+    # Aguardar registro no WSL (pode demorar alguns segundos após instalação)
+    Write-Warn "Aguardando registro da distro no WSL..."
+    $waited = 0
+    do {
+        Start-Sleep -Seconds 3
+        $waited += 3
+        $distroName = Get-UbuntuDistroName
+    } while (-not $distroName -and $waited -lt 60)
 
-    # Primeira execução: criar usuário padrão não-interativo
-    wsl -d Ubuntu -- bash -c "id -u qoc 2>/dev/null || (useradd -m -s /bin/bash qoc && echo 'qoc:qoc' | chpasswd && usermod -aG sudo qoc)" 2>$null
+    if (-not $distroName) {
+        Write-Err "Ubuntu não foi registrado no WSL após instalação."
+        Write-Host ""
+        Write-Host "  Solução manual:" -ForegroundColor Yellow
+        Write-Host "    1. Abra o menu Iniciar, procure 'Ubuntu' e execute-o uma vez" -ForegroundColor Yellow
+        Write-Host "       para completar a inicialização (criação de usuário)." -ForegroundColor Yellow
+        Write-Host "    2. Depois execute este script novamente." -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "  Ou tente no PowerShell: wsl --install -d Ubuntu" -ForegroundColor Yellow
+        exit 1
+    }
+
+    Write-Ok "Ubuntu instalado como: '$distroName'"
 } else {
-    Write-Ok "Ubuntu já instalado: $distros"
+    Write-Ok "Ubuntu encontrado: '$distroName'"
 }
 
-# Garantir WSL2 para Ubuntu
-try { wsl --set-version Ubuntu 2 2>&1 | Out-Null } catch {}
+# -------------------------------------------------------
+# 4b. Inicializar a distro se necessário (primeiro uso)
+# -------------------------------------------------------
+Write-Step "Inicializando distro '$distroName' (primeira execução)..."
+
+# Tentar um comando simples para ver se a distro já foi inicializada
+$testInit = wsl -d $distroName -- echo "ok" 2>&1
+if ($LASTEXITCODE -ne 0 -or $testInit -notmatch "ok") {
+    Write-Warn "Distro precisa de inicialização. Criando usuário padrão automaticamente..."
+
+    # Inicializar sem interação usando --user root
+    # Definir usuário padrão como root temporariamente para setup
+    wsl -d $distroName --user root -- bash -c "echo 'root:root' | chpasswd 2>/dev/null; echo ok" 2>&1 | Out-Null
+
+    # Verificar novamente
+    $testInit2 = wsl -d $distroName --user root -- echo "ok" 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Err "Não foi possível inicializar a distro automaticamente."
+        Write-Host ""
+        Write-Host "  Solução:" -ForegroundColor Yellow
+        Write-Host "    1. Abra o menu Iniciar, procure '$distroName' e execute-o" -ForegroundColor Yellow
+        Write-Host "    2. Crie um usuário quando solicitado" -ForegroundColor Yellow
+        Write-Host "    3. Execute este script novamente" -ForegroundColor Yellow
+        exit 1
+    }
+    Write-Ok "Distro inicializada."
+} else {
+    Write-Ok "Distro '$distroName' pronta."
+}
+
+# Garantir WSL2 para a distro
+try { wsl --set-version $distroName 2 2>&1 | Out-Null } catch {}
 
 # -------------------------------------------------------
 # 5. Rodar setup Linux dentro do WSL
 # -------------------------------------------------------
-Write-Step "Executando setup dentro do WSL (Ubuntu)..."
-Write-Host "  Isso instala Bun, gqwen-auth, OpenClaude e configura o ambiente." -ForegroundColor Gray
+Write-Step "Executando setup dentro do WSL ($distroName)..."
+Write-Host "  Instalando Bun, gqwen-auth, OpenClaude e configurando ambiente..." -ForegroundColor Gray
 Write-Host "  Só será necessário fazer login no browser do Qwen." -ForegroundColor Gray
 Write-Host ""
 
-$setupCmd = @'
-bash -c '
-  set -e
-  # Atualizar pacotes base
-  export DEBIAN_FRONTEND=noninteractive
-  sudo apt-get update -qq && sudo apt-get install -y -qq curl git unzip 2>/dev/null
+$setupScript = @'
+set -e
+export DEBIAN_FRONTEND=noninteractive
 
-  # Clonar ou atualizar repo
-  REPO_DIR="$HOME/setup-gq-oc"
-  if [ -d "$REPO_DIR/.git" ]; then
-    echo "[==>] Atualizando repositório..."
-    git -C "$REPO_DIR" pull --ff-only 2>/dev/null || true
-  else
-    echo "[==>] Clonando repositório..."
-    git clone https://github.com/edson-guillen/setup-gq-oc.git "$REPO_DIR"
-  fi
+echo "[==>] Atualizando pacotes base..."
+sudo apt-get update -qq 2>/dev/null && sudo apt-get install -y -qq curl git unzip 2>/dev/null
 
-  # Tornar scripts executáveis
-  chmod +x "$REPO_DIR"/scripts/*.sh
+REPO_DIR="$HOME/setup-gq-oc"
+if [ -d "$REPO_DIR/.git" ]; then
+  echo "[==>] Atualizando repositório..."
+  git -C "$REPO_DIR" pull --ff-only 2>/dev/null || true
+else
+  echo "[==>] Clonando repositório..."
+  git clone https://github.com/edson-guillen/setup-gq-oc.git "$REPO_DIR"
+fi
 
-  # Executar install.sh
-  bash "$REPO_DIR/scripts/install.sh"
+chmod +x "$REPO_DIR"/scripts/*.sh
 
-  # Executar first-run.sh
-  bash "$REPO_DIR/scripts/first-run.sh"
-'
+echo "[==>] Executando install.sh..."
+bash "$REPO_DIR/scripts/install.sh"
+
+echo "[==>] Executando first-run.sh..."
+bash "$REPO_DIR/scripts/first-run.sh"
 '@
 
-wsl -d Ubuntu -- bash -c $setupCmd
+# Escrever script em arquivo temporário no WSL para evitar problemas de escape
+$tmpScript = "/tmp/setup-gq-oc-bootstrap.sh"
+$setupScript | wsl -d $distroName --user root -- bash -c "cat > $tmpScript && chmod +x $tmpScript"
+wsl -d $distroName --user root -- bash $tmpScript
 
 if ($LASTEXITCODE -ne 0) {
     Write-Err "Setup falhou dentro do WSL. Verifique os logs acima."
-    Write-Host "  Para depurar: wsl -d Ubuntu" -ForegroundColor Yellow
+    Write-Host "  Para depurar: wsl -d $distroName" -ForegroundColor Yellow
     exit 1
 }
 
 # -------------------------------------------------------
-# 6. Criar aliases PowerShell para uso diário
+# 6. Criar funções PowerShell para uso diário
 # -------------------------------------------------------
 Write-Step "Criando comandos qoc-* no PowerShell..."
 
@@ -201,32 +266,28 @@ $profileDir = Split-Path $PROFILE -Parent
 if (-not (Test-Path $profileDir)) { New-Item -ItemType Directory -Path $profileDir -Force | Out-Null }
 if (-not (Test-Path $PROFILE)) { New-Item -ItemType File -Path $PROFILE -Force | Out-Null }
 
-$aliases = @'
+# Usar o nome real da distro nos aliases
+$aliases = @"
 
-# ─── setup-gq-oc aliases ──────────────────────────────────────
+# --- setup-gq-oc aliases (distro: $distroName) ---
 function qoc-start {
-    param([string]$ProjectPath = "")
-    if ($ProjectPath -ne "") {
-        wsl -d Ubuntu -- bash -c "source ~/.qwen-openclaude.env && gqwen serve on 2>/dev/null; cd '$ProjectPath' && openclaude"
+    param([string]`$ProjectPath = "")
+    if (`$ProjectPath -ne "") {
+        `$wslProj = wsl -d $distroName -- wslpath -u "`$ProjectPath" 2>`$null
+        if (-not `$wslProj) { `$wslProj = `$ProjectPath }
+        wsl -d $distroName -- bash -c "source ~/.qwen-openclaude.env 2>/dev/null; gqwen serve on 2>/dev/null; cd '`$wslProj' && openclaude"
     } else {
-        $wslPath = wsl -d Ubuntu -- bash -c "wslpath -u '$(Get-Location)'"
-        wsl -d Ubuntu -- bash -c "source ~/.qwen-openclaude.env && gqwen serve on 2>/dev/null; cd '$wslPath' && openclaude"
+        `$wslPath = wsl -d $distroName -- wslpath -u "`$(Get-Location)" 2>`$null
+        if (-not `$wslPath) { `$wslPath = "~" }
+        wsl -d $distroName -- bash -c "source ~/.qwen-openclaude.env 2>/dev/null; gqwen serve on 2>/dev/null; cd '`$wslPath' && openclaude"
     }
 }
 
-function qoc-stop {
-    wsl -d Ubuntu -- bash -c "source ~/.qwen-openclaude.env 2>/dev/null; gqwen serve off"
-}
-
-function qoc-status {
-    wsl -d Ubuntu -- bash -c "source ~/.qwen-openclaude.env 2>/dev/null; gqwen status"
-}
-
-function qoc-doctor {
-    wsl -d Ubuntu -- bash -c "bash ~/setup-gq-oc/scripts/doctor.sh"
-}
-# ──────────────────────────────────────────────────────────────
-'@
+function qoc-stop    { wsl -d $distroName -- bash -c "source ~/.qwen-openclaude.env 2>/dev/null; gqwen serve off" }
+function qoc-status  { wsl -d $distroName -- bash -c "source ~/.qwen-openclaude.env 2>/dev/null; gqwen status" }
+function qoc-doctor  { wsl -d $distroName -- bash ~/setup-gq-oc/scripts/doctor.sh }
+# --- fim setup-gq-oc ---
+"@
 
 $currentProfile = Get-Content $PROFILE -Raw -ErrorAction SilentlyContinue
 if ($null -eq $currentProfile -or -not $currentProfile.Contains('setup-gq-oc aliases')) {
@@ -246,13 +307,13 @@ if (Get-ScheduledTask -TaskName 'setup-gq-oc-resume' -ErrorAction SilentlyContin
 # -------------------------------------------------------
 Write-Host ""
 Write-Host "  +------------------------------------------+" -ForegroundColor Green
-Write-Host "  |   ✅  Setup concluído!                   |" -ForegroundColor Green
+Write-Host "  |   OK  Setup concluido!                   |" -ForegroundColor Green
 Write-Host "  +------------------------------------------+" -ForegroundColor Green
 Write-Host ""
 Write-Host "  Abra um novo terminal PowerShell e use:" -ForegroundColor Cyan
-Write-Host "    qoc-start              # inicia e abre OpenClaude aqui" -ForegroundColor White
+Write-Host "    qoc-start              # inicia proxy + OpenClaude aqui" -ForegroundColor White
 Write-Host "    qoc-start C:\meu-app   # especifica um projeto" -ForegroundColor White
 Write-Host "    qoc-stop               # para o proxy" -ForegroundColor White
 Write-Host "    qoc-status             # quota e tokens" -ForegroundColor White
-Write-Host "    qoc-doctor             # diagnóstico" -ForegroundColor White
+Write-Host "    qoc-doctor             # diagnostico" -ForegroundColor White
 Write-Host ""
