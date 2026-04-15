@@ -28,6 +28,13 @@ function Write-Banner {
     Write-Host ""
 }
 
+# -------------------------------------------------------
+# Refresh PATH da sessão atual
+# -------------------------------------------------------
+function Refresh-Path {
+    $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+}
+
 Write-Banner
 
 # -------------------------------------------------------
@@ -61,6 +68,7 @@ Write-Ok "$winVer (build $build) — compatível."
 # 3. Instalar Node.js via winget
 # -------------------------------------------------------
 Write-Step "Verificando Node.js..."
+Refresh-Path
 $nodeInstalled = $false
 try {
     $nodeVersion = node --version 2>$null
@@ -74,19 +82,48 @@ if (-not $nodeInstalled) {
     Write-Warn "Instalando Node.js via winget..."
     if (Get-Command winget -ErrorAction SilentlyContinue) {
         winget install --id OpenJS.NodeJS.LTS --accept-package-agreements --accept-source-agreements -e
-        # Atualizar PATH para incluir Node.js recém-instalado
-        $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+        
+        # Refresh PATH e adicionar caminhos comuns do Node.js
+        Refresh-Path
+        $nodePaths = @(
+            "$env:ProgramFiles\\nodejs",
+            "${env:ProgramFiles(x86)}\\nodejs",
+            "$env:APPDATA\\npm"
+        )
+        foreach ($p in $nodePaths) {
+            if ((Test-Path $p) -and ($env:Path -notlike "*$p*")) {
+                $env:Path = "$p;$env:Path"
+            }
+        }
+        
         Start-Sleep -Seconds 2
-        $nodeVersion = node --version 2>$null
-        Write-Ok "Node.js instalado: $nodeVersion"
+        
+        # Verificar se node está acessível agora
+        try {
+            $nodeVersion = node --version 2>$null
+            if ($LASTEXITCODE -eq 0) {
+                Write-Ok "Node.js instalado: $nodeVersion"
+            } else {
+                throw "Node não encontrado no PATH"
+            }
+        } catch {
+            Write-Err "Node.js foi instalado mas não está acessível."
+            Write-Host "  Execute em um novo terminal: node --version" -ForegroundColor Yellow
+            exit 1
+        }
     } else {
         Write-Err "winget não encontrado. Instale Node.js manualmente: https://nodejs.org"
         exit 1
     }
 }
 
-$npmVersion = npm --version 2>$null
-Write-Ok "npm $npmVersion"
+try {
+    $npmVersion = npm --version 2>$null
+    Write-Ok "npm $npmVersion"
+} catch {
+    Write-Err "npm não encontrado no PATH."
+    exit 1
+}
 
 # -------------------------------------------------------
 # 4. Instalar Bun
