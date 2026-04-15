@@ -5,18 +5,20 @@
 # Uso direto: curl -fsSL https://raw.githubusercontent.com/edson-guillen/setup-gq-oc/main/scripts/install.sh | bash
 # =============================================================
 
-set -euo pipefail
+# NOTA: não usar 'set -u' aqui pois nvm e outros scripts externos
+# podem usar variáveis não definidas
+set -eo pipefail
 
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; RED='\033[0;31m'; NC='\033[0m'
 step() { echo -e "\n${CYAN}==>${NC} $1"; }
-ok()   { echo -e "  ${GREEN}✓${NC} $1"; }
-warn() { echo -e "  ${YELLOW}⚠${NC}  $1"; }
-err()  { echo -e "  ${RED}✗${NC} $1"; }
+ok()   { echo -e "  ${GREEN}\u2713${NC} $1"; }
+warn() { echo -e "  ${YELLOW}\u26a0${NC}  $1"; }
+err()  { echo -e "  ${RED}\u2717${NC} $1"; }
 
 echo -e ""
-echo -e "${CYAN}╔══════════════════════════════════════════════╗${NC}"
-echo -e "${CYAN}║   🤖  setup-gq-oc  install.sh               ║${NC}"
-echo -e "${CYAN}╚══════════════════════════════════════════════╝${NC}"
+echo -e "${CYAN}\u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557${NC}"
+echo -e "${CYAN}\u2551   \ud83e\udd16  setup-gq-oc  install.sh               \u2551${NC}"
+echo -e "${CYAN}\u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d${NC}"
 
 # -------------------------------------------
 # 1. Detectar shell e SO
@@ -55,30 +57,71 @@ fi
 ok "curl, git, unzip disponíveis."
 
 # -------------------------------------------
-# 3. Instalar Node.js (LTS) se não existir
+# 3. Instalar Node.js LTS
+# Estratégia: apt via NodeSource (mais robusto em scripts não-interativos)
+# Fallback: nvm (com -u desativado para não quebrar em variáveis internas)
 # -------------------------------------------
 step "Verificando Node.js..."
-if ! command -v node &>/dev/null; then
-  warn "Node.js não encontrado. Instalando via nvm..."
-  curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
-  export NVM_DIR="$HOME/.nvm"
-  # shellcheck disable=SC1090
-  [ -s "$NVM_DIR/nvm.sh" ] && source "$NVM_DIR/nvm.sh"
-  nvm install --lts
-  nvm use --lts
 
-  # Persistir nvm no shell RC
-  if ! grep -q 'NVM_DIR' "$SHELL_RC" 2>/dev/null; then
-    cat >> "$SHELL_RC" << 'NVMEOF'
+if command -v node &>/dev/null; then
+  ok "Node.js já instalado: $(node --version)"
+else
+  warn "Node.js não encontrado. Instalando..."
+
+  NODE_INSTALLED=false
+
+  # Estratégia 1: apt via NodeSource (preferido em WSL/Ubuntu, não usa nvm)
+  if command -v apt-get &>/dev/null; then
+    warn "Instalando Node.js LTS via NodeSource..."
+    # Baixar e executar o setup do NodeSource para Node 22 LTS
+    curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - 2>/dev/null
+    sudo apt-get install -y -qq nodejs 2>/dev/null
+    if command -v node &>/dev/null; then
+      NODE_INSTALLED=true
+      ok "Node.js instalado via apt: $(node --version)"
+    fi
+  fi
+
+  # Estratégia 2: brew (macOS)
+  if ! $NODE_INSTALLED && command -v brew &>/dev/null; then
+    brew install node
+    NODE_INSTALLED=true
+  fi
+
+  # Estratégia 3: nvm fallback (com -u desativado para evitar 'unbound variable')
+  if ! $NODE_INSTALLED; then
+    warn "Instalando Node.js via nvm (fallback)..."
+    # Salvar e desativar pipefail/errexit temporariamente
+    set +eo pipefail
+    curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+    export NVM_DIR="$HOME/.nvm"
+    # shellcheck disable=SC1091
+    [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" --no-use
+    nvm install 22 2>/dev/null
+    nvm alias default 22 2>/dev/null
+    nvm use default 2>/dev/null
+    # Reativar
+    set -eo pipefail
+    export PATH="$NVM_DIR/versions/node/$(nvm version default 2>/dev/null || echo 'v22')/bin:$PATH"
+    # Persistir no shell RC
+    if ! grep -q 'NVM_DIR' "$SHELL_RC" 2>/dev/null; then
+      cat >> "$SHELL_RC" << 'NVMEOF'
 
 # nvm
 export NVM_DIR="$HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && source "$NVM_DIR/nvm.sh"
-[ -s "$NVM_DIR/bash_completion" ] && source "$NVM_DIR/bash_completion"
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+[ -s "$NVM_DIR/bash_completion" ] && . "$NVM_DIR/bash_completion"
 NVMEOF
+    fi
+    NODE_INSTALLED=true
+  fi
+
+  if ! command -v node &>/dev/null; then
+    err "Não foi possível instalar o Node.js. Instale manualmente: https://nodejs.org"
+    exit 1
   fi
 fi
-ok "Node.js $(node --version)"
+ok "Node.js $(node --version) | npm $(npm --version)"
 
 # -------------------------------------------
 # 4. Instalar Bun
@@ -92,8 +135,8 @@ if command -v bun &>/dev/null; then
 else
   warn "Instalando Bun..."
   curl -fsSL https://bun.sh/install | bash
-  # shellcheck disable=SC1090
-  source "$HOME/.bun/env" 2>/dev/null || true
+  # shellcheck disable=SC1091
+  [ -f "$HOME/.bun/env" ] && . "$HOME/.bun/env" || true
   export PATH="$HOME/.bun/bin:$PATH"
   ok "Bun instalado: $(bun --version)"
 fi
@@ -113,20 +156,21 @@ fi
 # -------------------------------------------
 step "Instalando gqwen-auth..."
 bun install -g gqwen-auth
-ok "gqwen-auth $(gqwen --version 2>/dev/null || echo 'instalado')"
+ok "gqwen-auth instalado."
 
 # -------------------------------------------
 # 6. Instalar OpenClaude
 # -------------------------------------------
 step "Instalando OpenClaude..."
-npm install -g openclaude 2>/dev/null || {
+# Tentar sem sudo primeiro; se falhar (permissão), tentar com sudo
+if ! npm install -g openclaude 2>/dev/null; then
   warn "Tentando com sudo..."
   sudo npm install -g openclaude
-}
+fi
 ok "OpenClaude instalado."
 
 # -------------------------------------------
-# 7. Clonar/atualizar o repositório
+# 7. Clonar/atualizar repositório
 # -------------------------------------------
 step "Verificando repositório setup-gq-oc..."
 REPO_DIR="$HOME/setup-gq-oc"
@@ -161,7 +205,7 @@ else
   ok "Variáveis já presentes em $SHELL_RC"
 fi
 # shellcheck disable=SC1090
-source "$ENV_FILE"
+. "$ENV_FILE"
 
 # -------------------------------------------
 # 9. Criar comandos qoc-* no shell
@@ -171,7 +215,7 @@ step "Criando aliases qoc-*..."
 if ! grep -q 'qoc-start' "$SHELL_RC" 2>/dev/null; then
   cat >> "$SHELL_RC" << 'ALIASEOF'
 
-# ─── setup-gq-oc commands ───────────────────────────────────
+# --- setup-gq-oc commands ---
 alias qoc-stop="gqwen serve off"
 alias qoc-status="gqwen status"
 alias qoc-doctor="bash ~/setup-gq-oc/scripts/doctor.sh"
@@ -181,7 +225,7 @@ qoc-start() {
   gqwen serve on 2>/dev/null || true
   cd "$project" && openclaude
 }
-# ────────────────────────────────────────────────────────────
+# --- fim setup-gq-oc ---
 ALIASEOF
   ok "Aliases qoc-* adicionados."
 else
@@ -189,12 +233,12 @@ else
 fi
 
 # -------------------------------------------
-# Concluído — chamar first-run.sh
+# Concluído
 # -------------------------------------------
 echo ""
-echo -e "${GREEN}╔══════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║   ✅  Dependências instaladas!               ║${NC}"
-echo -e "${GREEN}╚══════════════════════════════════════════════╝${NC}"
+echo -e "${GREEN}\u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557${NC}"
+echo -e "${GREEN}\u2551   \u2705  Depend\u00eancias instaladas!               \u2551${NC}"
+echo -e "${GREEN}\u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d${NC}"
 echo ""
 
 # Se não foi chamado pelo windows.ps1, executar first-run diretamente
