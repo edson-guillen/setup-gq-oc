@@ -250,11 +250,12 @@ echo "[==>] Executando first-run.sh..."
 bash "$REPO_DIR/scripts/first-run.sh"
 '@
 
-# Escrever script em arquivo temporário no WSL para evitar problemas de escape
-$tmpScript = "/tmp/setup-gq-oc-bootstrap.sh"
-$tmpScriptCmd = 'cat > ' + $tmpScript + ' && chmod +x ' + $tmpScript
-$setupScript | wsl -d $distroName --user root -- bash -lc $tmpScriptCmd
-wsl -d $distroName --user root -- bash $tmpScript
+# Criar arquivo temporário local no Windows e copiar para WSL (método seguro)
+$localTmpScript = "$env:TEMP\setup-gq-oc-bootstrap.sh"
+$utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+$setupScript | Out-File -FilePath $localTmpScript -Encoding $utf8NoBom -NoNewline
+wsl -d $distroName --user root -- bash -lc "cp /mnt/c${(Resolve-Path $localTmpScript).Path.Replace('\','/')} /tmp/setup-gq-oc-bootstrap.sh && chmod +x /tmp/setup-gq-oc-bootstrap.sh && bash /tmp/setup-gq-oc-bootstrap.sh"
+Remove-Item $localTmpScript -Force -ErrorAction SilentlyContinue
 
 if ($LASTEXITCODE -ne 0) {
     Write-Err "Setup falhou dentro do WSL. Verifique os logs acima."
