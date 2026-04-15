@@ -5,18 +5,21 @@
 # Uso: qoc-doctor  |  bash ~/setup-gq-oc/scripts/doctor.sh
 # =============================================================
 
+# Sem -u e sem -e: doctor deve continuar mesmo que algo falhe
+set -o pipefail
+
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; RED='\033[0;31m'; BOLD='\033[1m'; NC='\033[0m'
-check() { echo -e "  ${GREEN}✓${NC} $1"; }
-fail()  { echo -e "  ${RED}✗${NC} $1"; FAILURES=$((FAILURES+1)); }
-warn()  { echo -e "  ${YELLOW}⚠${NC}  $1"; WARNINGS=$((WARNINGS+1)); }
-info()  { echo -e "  ${CYAN}·${NC} $1"; }
+check() { echo -e "  ${GREEN}\xE2\x9C\x93${NC} $1"; }
+fail()  { echo -e "  ${RED}X${NC} $1"; FAILURES=$((FAILURES+1)); }
+warn()  { echo -e "  ${YELLOW}!${NC}  $1"; WARNINGS=$((WARNINGS+1)); }
+info()  { echo -e "  ${CYAN}.${NC} $1"; }
 
 FAILURES=0; WARNINGS=0
 
 echo ""
-echo -e "${BOLD}${CYAN}╔══════════════════════════════════════════════╗${NC}"
-echo -e "${BOLD}${CYAN}║   🩺  setup-gq-oc  doctor.sh                ║${NC}"
-echo -e "${BOLD}${CYAN}╚══════════════════════════════════════════════╝${NC}"
+echo -e "${BOLD}${CYAN}=================================================${NC}"
+echo -e "${BOLD}${CYAN}   setup-gq-oc  doctor.sh${NC}"
+echo -e "${BOLD}${CYAN}=================================================${NC}"
 echo ""
 
 # Carregar env
@@ -26,9 +29,9 @@ if [ -d "$HOME/.nvm/versions/node" ]; then
   NVM_NODE_BIN=$(ls -d "$HOME"/.nvm/versions/node/*/bin 2>/dev/null | sort -V | tail -1 || true)
   [ -n "$NVM_NODE_BIN" ] && export PATH="$NVM_NODE_BIN:$PATH"
 fi
-[ -f "$ENV_FILE" ] && source "$ENV_FILE"
+[ -f "$ENV_FILE" ] && source "$ENV_FILE" || true
 
-# ─────────────────────────────────────────────
+# -------------------------------------------
 echo -e "${BOLD}[ Sistema ]${NC}"
 uname_out=$(uname -sr 2>/dev/null || echo 'desconhecido')
 info "SO: $uname_out"
@@ -38,7 +41,7 @@ else
   info "Ambiente: Nativo"
 fi
 
-# ─────────────────────────────────────────────
+# -------------------------------------------
 echo ""
 echo -e "${BOLD}[ Ferramentas ]${NC}"
 
@@ -78,7 +81,7 @@ else
   fail "ripgrep não encontrado. Instale: sudo apt-get install -y ripgrep"
 fi
 
-# ─────────────────────────────────────────────
+# -------------------------------------------
 echo ""
 echo -e "${BOLD}[ gqwen-auth ]${NC}"
 
@@ -95,18 +98,17 @@ else
   fail "Nenhuma conta Qwen. Execute: gqwen add"
 fi
 
-# ─────────────────────────────────────────────
+# -------------------------------------------
 echo ""
 echo -e "${BOLD}[ Proxy ]${NC}"
 
-PROXY_STATUS=$(gqwen serve 2>/dev/null | head -3 || echo 'desconhecido')
 if curl -sf http://localhost:3099/v1/models &>/dev/null; then
   check "Proxy rodando em http://localhost:3099/v1"
 else
   fail "Proxy não responde. Execute: gqwen serve on"
 fi
 
-# ─────────────────────────────────────────────
+# -------------------------------------------
 echo ""
 echo -e "${BOLD}[ OpenClaude ]${NC}"
 
@@ -116,16 +118,35 @@ else
   fail "openclaude não encontrado. Execute: npm install -g @gitlawb/openclaude"
 fi
 
-# ─────────────────────────────────────────────
+# -------------------------------------------
 echo ""
 echo -e "${BOLD}[ Variáveis de Ambiente ]${NC}"
 
-[ -f "$ENV_FILE" ] && check "Arquivo .env presente: $ENV_FILE" || fail "Arquivo .env ausente: $ENV_FILE"
-[ -n "${CLAUDE_CODE_USE_OPENAI:-}" ] && check "CLAUDE_CODE_USE_OPENAI=1" || fail "CLAUDE_CODE_USE_OPENAI não definido"
-[ -n "${OPENAI_BASE_URL:-}" ] && check "OPENAI_BASE_URL=${OPENAI_BASE_URL}" || fail "OPENAI_BASE_URL não definido"
-[ -n "${OPENAI_MODEL:-}" ] && check "OPENAI_MODEL=${OPENAI_MODEL}" || warn "OPENAI_MODEL não definido (padrão: qwen3-coder-plus)"
+if [ -f "$ENV_FILE" ]; then
+  check "Arquivo .env presente: $ENV_FILE"
+else
+  fail "Arquivo .env ausente: $ENV_FILE"
+fi
 
-# ─────────────────────────────────────────────
+if [ -n "${CLAUDE_CODE_USE_OPENAI:-}" ]; then
+  check "CLAUDE_CODE_USE_OPENAI=1"
+else
+  fail "CLAUDE_CODE_USE_OPENAI não definido"
+fi
+
+if [ -n "${OPENAI_BASE_URL:-}" ]; then
+  check "OPENAI_BASE_URL=${OPENAI_BASE_URL}"
+else
+  fail "OPENAI_BASE_URL não definido"
+fi
+
+if [ -n "${OPENAI_MODEL:-}" ]; then
+  check "OPENAI_MODEL=${OPENAI_MODEL}"
+else
+  warn "OPENAI_MODEL não definido (padrão: qwen3-coder-plus)"
+fi
+
+# -------------------------------------------
 echo ""
 echo -e "${BOLD}[ Teste de API ]${NC}"
 
@@ -142,15 +163,15 @@ else
   warn "Proxy offline — teste de API ignorado."
 fi
 
-# ─────────────────────────────────────────────
+# -------------------------------------------
 echo ""
 if [ $FAILURES -gt 0 ]; then
-  echo -e "${RED}╔══════════════════════════════════════════════╗${NC}"
-  echo -e "${RED}║  $FAILURES erro(s) encontrado(s). Veja acima.   ║${NC}"
-  echo -e "${RED}╚══════════════════════════════════════════════╝${NC}"
+  echo -e "${RED}=================================================${NC}"
+  echo -e "${RED}  $FAILURES erro(s) encontrado(s). Veja acima.${NC}"
+  echo -e "${RED}=================================================${NC}"
 else
-  echo -e "${GREEN}╔══════════════════════════════════════════════╗${NC}"
-  echo -e "${GREEN}║  ✅  Tudo OK! ${WARNINGS} aviso(s).               ║${NC}"
-  echo -e "${GREEN}╚══════════════════════════════════════════════╝${NC}"
+  echo -e "${GREEN}=================================================${NC}"
+  echo -e "${GREEN}  OK  Tudo OK! $WARNINGS aviso(s).${NC}"
+  echo -e "${GREEN}=================================================${NC}"
 fi
 echo ""
