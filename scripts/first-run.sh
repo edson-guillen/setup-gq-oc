@@ -34,9 +34,10 @@ echo -e "${CYAN}=================================================${NC}"
 
 # -------------------------------------------
 # 1. Verificar se já existe conta Qwen
+# CORREÇÃO: detecta contas por linhas numeradas, não por '@'
 # -------------------------------------------
 step "Verificando contas Qwen cadastradas..."
-ACCOUNT_COUNT=$(gqwen list 2>/dev/null | grep -c '@' || echo 0)
+ACCOUNT_COUNT=$(gqwen list 2>/dev/null | grep -E '^\s*[0-9]+\s+[a-f0-9]+' | wc -l || echo 0)
 
 if [ "$ACCOUNT_COUNT" -gt 0 ]; then
   ok "$ACCOUNT_COUNT conta(s) Qwen já cadastrada(s). Pulando login."
