@@ -22,7 +22,7 @@ function Write-Err   { param($msg) Write-Host "  [X]  $msg" -ForegroundColor Red
 function Write-Banner {
     Write-Host ""
     Write-Host "  +------------------------------------------+" -ForegroundColor Cyan
-    Write-Host "  |   🤖  setup-gq-oc  Windows Bootstrap      |" -ForegroundColor Cyan
+    Write-Host "  |   setup-gq-oc  Windows Bootstrap         |" -ForegroundColor Cyan
     Write-Host "  |   gqwen-auth + OpenClaude via WSL2        |" -ForegroundColor Cyan
     Write-Host "  +------------------------------------------+" -ForegroundColor Cyan
     Write-Host ""
@@ -132,21 +132,17 @@ $distroName = Get-UbuntuDistroName
 if (-not $distroName) {
     Write-Warn "Ubuntu não encontrado. Instalando via wsl --install..."
 
-    # Estratégia 1: wsl --install (mais confiável para registrar no WSL)
     $installOk = $false
     try {
-        # Tenta instalar silenciosamente; pode abrir janela de inicialização
         $proc = Start-Process -FilePath "wsl.exe" -ArgumentList "--install -d Ubuntu" `
             -PassThru -WindowStyle Normal
         Write-Host "  Instalando Ubuntu... aguarde (pode abrir uma janela)." -ForegroundColor Yellow
-        # Aguarda até 3 min
         $proc.WaitForExit(180000) | Out-Null
         $installOk = $true
     } catch {
         $installOk = $false
     }
 
-    # Estratégia 2: winget como fallback
     if (-not $installOk -or -not (Get-UbuntuDistroName)) {
         if (Get-Command winget -ErrorAction SilentlyContinue) {
             Write-Warn "Tentando via winget..."
@@ -154,7 +150,6 @@ if (-not $distroName) {
         }
     }
 
-    # Aguardar registro no WSL (pode demorar alguns segundos após instalação)
     Write-Warn "Aguardando registro da distro no WSL..."
     $waited = 0
     do {
@@ -185,16 +180,10 @@ if (-not $distroName) {
 # -------------------------------------------------------
 Write-Step "Inicializando distro '$distroName' (primeira execução)..."
 
-# Tentar um comando simples para ver se a distro já foi inicializada
 $testInit = wsl -d $distroName -- echo "ok" 2>&1
-if ($LASTEXITCODE -ne 0 -or $testInit -notmatch "ok") {
+if ($LASTEXITCODE -ne 0 -or "$testInit" -notmatch "ok") {
     Write-Warn "Distro precisa de inicialização. Criando usuário padrão automaticamente..."
-
-    # Inicializar sem interação usando --user root
-    # Definir usuário padrão como root temporariamente para setup
     wsl -d $distroName --user root -- bash -c "echo 'root:root' | chpasswd 2>/dev/null; echo ok" 2>&1 | Out-Null
-
-    # Verificar novamente
     $testInit2 = wsl -d $distroName --user root -- echo "ok" 2>&1
     if ($LASTEXITCODE -ne 0) {
         Write-Err "Não foi possível inicializar a distro automaticamente."
@@ -215,14 +204,17 @@ try { wsl --set-version $distroName 2 2>&1 | Out-Null } catch {}
 
 # -------------------------------------------------------
 # 5. Rodar setup Linux dentro do WSL
+#    IMPORTANTE: passamos o script via arquivo /tmp/ para
+#    evitar problemas de escape de aspas do PowerShell.
 # -------------------------------------------------------
 Write-Step "Executando setup dentro do WSL ($distroName)..."
 Write-Host "  Instalando Bun, gqwen-auth, OpenClaude e configurando ambiente..." -ForegroundColor Gray
 Write-Host "  Só será necessário fazer login no browser do Qwen." -ForegroundColor Gray
 Write-Host ""
 
+# Script bash a ser executado dentro do WSL (sem here-string inline para evitar escape)
 $setupScript = @'
-set -e
+set -eo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
 echo "[==>] Atualizando pacotes base..."
@@ -233,7 +225,7 @@ if [ -d "$REPO_DIR/.git" ]; then
   echo "[==>] Atualizando repositório..."
   git -C "$REPO_DIR" config core.fileMode false || true
   if [ -n "$(git -C "$REPO_DIR" -c core.fileMode=false status --porcelain 2>/dev/null)" ]; then
-    echo "[==>] Repositorio local com alteracoes; pulando git pull para nao sobrescrever..."
+    echo "[==>] Repositorio local com alteracoes; pulando git pull..."
   else
     git -C "$REPO_DIR" -c core.fileMode=false pull --ff-only 2>/dev/null || echo "[!!] Falha ao atualizar repositorio. Seguindo com copia local."
   fi
@@ -250,14 +242,26 @@ echo "[==>] Executando first-run.sh..."
 bash "$REPO_DIR/scripts/first-run.sh"
 '@
 
-# Criar arquivo temporário local no Windows e copiar para WSL (método seguro)
+# Gravar o script em arquivo temporário Windows (UTF-8 sem BOM)
 $localTmpScript = "$env:TEMP\setup-gq-oc-bootstrap.sh"
 $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
-$setupScript | Out-File -FilePath $localTmpScript -Encoding $utf8NoBom -NoNewline
-wsl -d $distroName --user root -- bash -lc "cp /mnt/c${(Resolve-Path $localTmpScript).Path.Replace('\','/')} /tmp/setup-gq-oc-bootstrap.sh && chmod +x /tmp/setup-gq-oc-bootstrap.sh && bash /tmp/setup-gq-oc-bootstrap.sh"
-Remove-Item $localTmpScript -Force -ErrorAction SilentlyContinue
+[System.IO.File]::WriteAllText($localTmpScript, $setupScript, $utf8NoBom)
 
-if ($LASTEXITCODE -ne 0) {
+# Converter caminho Windows para caminho WSL (/mnt/c/...)
+$winPath = (Resolve-Path $localTmpScript).Path
+$wslTmpPath = "/tmp/setup-gq-oc-bootstrap.sh"
+
+# Copiar para /tmp do WSL e executar (evita todos os problemas de escape)
+wsl -d $distroName -- cp "/mnt/$($winPath.Replace('\','/').Replace(':','').ToLower())" $wslTmpPath
+wsl -d $distroName -- chmod +x $wslTmpPath
+wsl -d $distroName -- bash -lc "bash $wslTmpPath"
+$setupExitCode = $LASTEXITCODE
+
+# Limpar arquivos temporários
+Remove-Item $localTmpScript -Force -ErrorAction SilentlyContinue
+wsl -d $distroName -- rm -f $wslTmpPath 2>$null
+
+if ($setupExitCode -ne 0) {
     Write-Err "Setup falhou dentro do WSL. Verifique os logs acima."
     Write-Host "  Para depurar: wsl -d $distroName" -ForegroundColor Yellow
     exit 1
@@ -272,29 +276,30 @@ $profileDir = Split-Path $PROFILE -Parent
 if (-not (Test-Path $profileDir)) { New-Item -ItemType Directory -Path $profileDir -Force | Out-Null }
 if (-not (Test-Path $PROFILE)) { New-Item -ItemType File -Path $PROFILE -Force | Out-Null }
 
-# Usar o nome real da distro nos aliases
-$aliases = @'
+# Usar o nome real da distro nos aliases (substituído dinamicamente)
+$aliasesTemplate = @'
 
-# --- setup-gq-oc aliases (distro: __DISTRO__) ---
+# --- setup-gq-oc aliases (distro: DISTRO_PLACEHOLDER) ---
 function qoc-start {
     param([string]$ProjectPath = "")
     if ($ProjectPath -ne "") {
-        $wslProj = wsl -d __DISTRO__ -- wslpath -u "$ProjectPath" 2>$null
+        $wslProj = wsl -d DISTRO_PLACEHOLDER -- wslpath -u "$ProjectPath" 2>$null
         if (-not $wslProj) { $wslProj = $ProjectPath }
-        wsl -d __DISTRO__ -- bash -lc "bash ~/setup-gq-oc/scripts/start.sh '$wslProj'"
+        wsl -d DISTRO_PLACEHOLDER -- bash -lc "bash ~/setup-gq-oc/scripts/start.sh '$wslProj'"
     } else {
-        $wslPath = wsl -d __DISTRO__ -- wslpath -u "$(Get-Location)" 2>$null
+        $wslPath = wsl -d DISTRO_PLACEHOLDER -- wslpath -u "$(Get-Location)" 2>$null
         if (-not $wslPath) { $wslPath = "~" }
-        wsl -d __DISTRO__ -- bash -lc "bash ~/setup-gq-oc/scripts/start.sh '$wslPath'"
+        wsl -d DISTRO_PLACEHOLDER -- bash -lc "bash ~/setup-gq-oc/scripts/start.sh '$wslPath'"
     }
 }
 
-function qoc-stop    { wsl -d __DISTRO__ -- bash -c "source ~/.qwen-openclaude.env 2>/dev/null; gqwen serve off" }
-function qoc-status  { wsl -d __DISTRO__ -- bash -c "source ~/.qwen-openclaude.env 2>/dev/null; gqwen status" }
-function qoc-doctor  { wsl -d __DISTRO__ -- bash ~/setup-gq-oc/scripts/doctor.sh }
+function qoc-stop    { wsl -d DISTRO_PLACEHOLDER -- bash -c "source ~/.qwen-openclaude.env 2>/dev/null; gqwen serve off" }
+function qoc-status  { wsl -d DISTRO_PLACEHOLDER -- bash -c "source ~/.qwen-openclaude.env 2>/dev/null; gqwen status" }
+function qoc-doctor  { wsl -d DISTRO_PLACEHOLDER -- bash ~/setup-gq-oc/scripts/doctor.sh }
 # --- fim setup-gq-oc ---
 '@
-$aliases = $aliases.Replace('__DISTRO__', $distroName)
+
+$aliases = $aliasesTemplate.Replace('DISTRO_PLACEHOLDER', $distroName)
 
 $currentProfile = Get-Content $PROFILE -Raw -ErrorAction SilentlyContinue
 if ($null -eq $currentProfile -or -not $currentProfile.Contains('setup-gq-oc aliases')) {
