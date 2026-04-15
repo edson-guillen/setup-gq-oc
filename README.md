@@ -1,32 +1,30 @@
-# 🤖 setup-gq-oc
+# setup-gq-oc
 
-> **gqwen-auth** (proxy Qwen gratuito via OAuth) + **OpenClaude** (agente de dev)
+> **gqwen-auth** (proxy Qwen gratuito via OAuth) + **OpenClaude** (agente de dev CLI)  
 > Um único comando faz todo o setup técnico. Só te pede o login no browser.
 
 ---
 
-## ⚡ Instalação — escolha seu sistema
+## Instalação — escolha seu sistema
 
-### 🪟 Windows 10/11 (PowerShell — recomendado)
-
-Abra o **PowerShell como Administrador** e rode:
+### Windows 10/11 (PowerShell como Administrador)
 
 ```powershell
 irm https://raw.githubusercontent.com/edson-guillen/setup-gq-oc/main/bootstrap/windows.ps1 | iex
 ```
 
 O script:
-1. Verifica compatibilidade do Windows
+1. Verifica compatibilidade do Windows (build >= 19041)
 2. Instala WSL2 + Ubuntu automaticamente (se necessário)
-3. Entra no WSL e executa o setup Linux completo
-4. Cria os comandos `qoc-start`, `qoc-stop`, `qoc-status` e `qoc-doctor`
-5. Abre o browser **só para o login OAuth no qwen.ai** (inevitável)
+3. Detecta o nome real da distro registrada (Ubuntu, Ubuntu-24.04, etc.)
+4. Inicializa a distro sem interação
+5. Executa o setup Linux completo dentro do WSL
+6. Cria os comandos `qoc-start`, `qoc-stop`, `qoc-status` e `qoc-doctor` no PowerShell
+7. Abre o browser **só para o login OAuth no qwen.ai** (inevitável)
 
-> Se precisar reiniciar para ativar WSL2, o script avisa e retoma sozinho após o reboot.
+> Se precisar reiniciar para ativar WSL2, o script agenda a retomada automática após o reboot.
 
----
-
-### 🐧 Linux / 🍎 macOS
+### Linux / macOS / WSL2
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/edson-guillen/setup-gq-oc/main/scripts/install.sh | bash
@@ -34,7 +32,7 @@ curl -fsSL https://raw.githubusercontent.com/edson-guillen/setup-gq-oc/main/scri
 
 ---
 
-## 🚀 Uso diário (após setup)
+## Uso diário (após setup)
 
 ```bash
 qoc-start                    # inicia proxy + abre OpenClaude no diretório atual
@@ -46,7 +44,7 @@ qoc-doctor                   # diagnóstico completo do ambiente
 
 ---
 
-## 📁 Estrutura
+## Estrutura
 
 ```
 setup-gq-oc/
@@ -64,7 +62,7 @@ setup-gq-oc/
 
 ---
 
-## 🧩 Modelos disponíveis
+## Modelos disponíveis
 
 | `OPENAI_MODEL` | Uso ideal |
 |---|---|
@@ -80,7 +78,7 @@ export OPENAI_MODEL=qwen3-coder-flash
 
 ---
 
-## ⚙️ Referência de comandos gqwen-auth
+## Referência de comandos gqwen-auth
 
 | Comando | Descrição |
 |---|---|
@@ -96,6 +94,16 @@ export OPENAI_MODEL=qwen3-coder-flash
 
 ---
 
-## 📝 Licença
+## Decisões técnicas
+
+- **Sem `set -u`** em todos os scripts bash: instaladores externos (Bun, nvm) usam variáveis internas que quebram com `unset variable`
+- **Node.js via NodeSource apt**: nunca via nvm em scripts não-interativos
+- **Script bash passado ao WSL via `/tmp/`**: evita problemas de escape de aspas e here-strings no PowerShell
+- **Idempotente**: rodar duas vezes não causa erros nem reinstala o que já existe
+- **Detecção robusta de distro**: trata UTF-16 e nomes variados (Ubuntu, Ubuntu-24.04, etc.)
+
+---
+
+## Licença
 
 MIT
