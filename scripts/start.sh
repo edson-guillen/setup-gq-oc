@@ -27,7 +27,12 @@ if ! command -v gqwen &>/dev/null; then
 fi
 
 if ! command -v openclaude &>/dev/null; then
-  err "openclaude não encontrado. Execute o install.sh primeiro."
+  err "openclaude não encontrado. Execute o install.sh para instalar @gitlawb/openclaude."
+  exit 1
+fi
+
+if ! command -v rg &>/dev/null; then
+  err "ripgrep (rg) não encontrado. Execute o install.sh primeiro."
   exit 1
 fi
 

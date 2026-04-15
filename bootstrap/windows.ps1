@@ -226,21 +226,25 @@ set -e
 export DEBIAN_FRONTEND=noninteractive
 
 echo "[==>] Atualizando pacotes base..."
-sudo apt-get update -qq 2>/dev/null && sudo apt-get install -y -qq curl git unzip 2>/dev/null
+sudo apt-get update -qq 2>/dev/null && sudo apt-get install -y -qq curl git unzip ripgrep 2>/dev/null
 
 REPO_DIR="$HOME/setup-gq-oc"
 if [ -d "$REPO_DIR/.git" ]; then
   echo "[==>] Atualizando repositório..."
-  git -C "$REPO_DIR" pull --ff-only 2>/dev/null || true
+  git -C "$REPO_DIR" config core.fileMode false || true
+  if [ -n "$(git -C "$REPO_DIR" -c core.fileMode=false status --porcelain 2>/dev/null)" ]; then
+    echo "[==>] Repositorio local com alteracoes; pulando git pull para nao sobrescrever..."
+  else
+    git -C "$REPO_DIR" -c core.fileMode=false pull --ff-only 2>/dev/null || echo "[!!] Falha ao atualizar repositorio. Seguindo com copia local."
+  fi
 else
   echo "[==>] Clonando repositório..."
   git clone https://github.com/edson-guillen/setup-gq-oc.git "$REPO_DIR"
+  git -C "$REPO_DIR" config core.fileMode false || true
 fi
 
-chmod +x "$REPO_DIR"/scripts/*.sh
-
 echo "[==>] Executando install.sh..."
-bash "$REPO_DIR/scripts/install.sh"
+SKIP_FIRST_RUN=1 bash "$REPO_DIR/scripts/install.sh"
 
 echo "[==>] Executando first-run.sh..."
 bash "$REPO_DIR/scripts/first-run.sh"
@@ -248,7 +252,8 @@ bash "$REPO_DIR/scripts/first-run.sh"
 
 # Escrever script em arquivo temporário no WSL para evitar problemas de escape
 $tmpScript = "/tmp/setup-gq-oc-bootstrap.sh"
-$setupScript | wsl -d $distroName --user root -- bash -c "cat > $tmpScript && chmod +x $tmpScript"
+$tmpScriptCmd = 'cat > ' + $tmpScript + ' && chmod +x ' + $tmpScript
+$setupScript | wsl -d $distroName --user root -- bash -lc $tmpScriptCmd
 wsl -d $distroName --user root -- bash $tmpScript
 
 if ($LASTEXITCODE -ne 0) {
@@ -267,34 +272,35 @@ if (-not (Test-Path $profileDir)) { New-Item -ItemType Directory -Path $profileD
 if (-not (Test-Path $PROFILE)) { New-Item -ItemType File -Path $PROFILE -Force | Out-Null }
 
 # Usar o nome real da distro nos aliases
-$aliases = @"
+$aliases = @'
 
-# --- setup-gq-oc aliases (distro: $distroName) ---
+# --- setup-gq-oc aliases (distro: __DISTRO__) ---
 function qoc-start {
-    param([string]`$ProjectPath = "")
-    if (`$ProjectPath -ne "") {
-        `$wslProj = wsl -d $distroName -- wslpath -u "`$ProjectPath" 2>`$null
-        if (-not `$wslProj) { `$wslProj = `$ProjectPath }
-        wsl -d $distroName -- bash -c "source ~/.qwen-openclaude.env 2>/dev/null; gqwen serve on 2>/dev/null; cd '`$wslProj' && openclaude"
+    param([string]$ProjectPath = "")
+    if ($ProjectPath -ne "") {
+        $wslProj = wsl -d __DISTRO__ -- wslpath -u "$ProjectPath" 2>$null
+        if (-not $wslProj) { $wslProj = $ProjectPath }
+        wsl -d __DISTRO__ -- bash -lc "bash ~/setup-gq-oc/scripts/start.sh '$wslProj'"
     } else {
-        `$wslPath = wsl -d $distroName -- wslpath -u "`$(Get-Location)" 2>`$null
-        if (-not `$wslPath) { `$wslPath = "~" }
-        wsl -d $distroName -- bash -c "source ~/.qwen-openclaude.env 2>/dev/null; gqwen serve on 2>/dev/null; cd '`$wslPath' && openclaude"
+        $wslPath = wsl -d __DISTRO__ -- wslpath -u "$(Get-Location)" 2>$null
+        if (-not $wslPath) { $wslPath = "~" }
+        wsl -d __DISTRO__ -- bash -lc "bash ~/setup-gq-oc/scripts/start.sh '$wslPath'"
     }
 }
 
-function qoc-stop    { wsl -d $distroName -- bash -c "source ~/.qwen-openclaude.env 2>/dev/null; gqwen serve off" }
-function qoc-status  { wsl -d $distroName -- bash -c "source ~/.qwen-openclaude.env 2>/dev/null; gqwen status" }
-function qoc-doctor  { wsl -d $distroName -- bash ~/setup-gq-oc/scripts/doctor.sh }
+function qoc-stop    { wsl -d __DISTRO__ -- bash -c "source ~/.qwen-openclaude.env 2>/dev/null; gqwen serve off" }
+function qoc-status  { wsl -d __DISTRO__ -- bash -c "source ~/.qwen-openclaude.env 2>/dev/null; gqwen status" }
+function qoc-doctor  { wsl -d __DISTRO__ -- bash ~/setup-gq-oc/scripts/doctor.sh }
 # --- fim setup-gq-oc ---
-"@
+'@
+$aliases = $aliases.Replace('__DISTRO__', $distroName)
 
 $currentProfile = Get-Content $PROFILE -Raw -ErrorAction SilentlyContinue
 if ($null -eq $currentProfile -or -not $currentProfile.Contains('setup-gq-oc aliases')) {
     Add-Content -Path $PROFILE -Value $aliases
     Write-Ok "Comandos qoc-* adicionados ao perfil PowerShell."
 } else {
-    Write-Ok "Comandos qoc-* já presentes no perfil PowerShell."
+    Write-Ok "Comandos qoc-* ja presentes no perfil PowerShell."
 }
 
 # Remover task de reboot se existir

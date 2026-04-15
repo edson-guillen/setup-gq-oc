@@ -21,7 +21,11 @@ echo ""
 
 # Carregar env
 ENV_FILE="$HOME/.qwen-openclaude.env"
-export PATH="$HOME/.bun/bin:$HOME/.nvm/versions/node/$(ls $HOME/.nvm/versions/node/ 2>/dev/null | tail -1)/bin:$PATH"
+export PATH="$HOME/.bun/bin:$PATH"
+if [ -d "$HOME/.nvm/versions/node" ]; then
+  NVM_NODE_BIN=$(ls -d "$HOME"/.nvm/versions/node/*/bin 2>/dev/null | sort -V | tail -1 || true)
+  [ -n "$NVM_NODE_BIN" ] && export PATH="$NVM_NODE_BIN:$PATH"
+fi
 [ -f "$ENV_FILE" ] && source "$ENV_FILE"
 
 # ─────────────────────────────────────────────
@@ -68,6 +72,12 @@ else
   fail "curl não encontrado."
 fi
 
+if command -v rg &>/dev/null; then
+  check "ripgrep: $(rg --version | head -1)"
+else
+  fail "ripgrep não encontrado. Instale: sudo apt-get install -y ripgrep"
+fi
+
 # ─────────────────────────────────────────────
 echo ""
 echo -e "${BOLD}[ gqwen-auth ]${NC}"
@@ -103,7 +113,7 @@ echo -e "${BOLD}[ OpenClaude ]${NC}"
 if command -v openclaude &>/dev/null; then
   check "openclaude instalado."
 else
-  fail "openclaude não encontrado. Execute: npm install -g openclaude"
+  fail "openclaude não encontrado. Execute: npm install -g @gitlawb/openclaude"
 fi
 
 # ─────────────────────────────────────────────

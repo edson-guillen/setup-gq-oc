@@ -13,6 +13,28 @@ step() { echo -e "\n${CYAN}==>${NC} $1"; }
 ok()   { echo -e "  ${GREEN}\xE2\x9C\x93${NC} $1"; }
 warn() { echo -e "  ${YELLOW}!${NC}  $1"; }
 err()  { echo -e "  ${RED}X${NC} $1"; }
+OPENCLAUDE_PACKAGE='@gitlawb/openclaude'
+
+sync_repo() {
+  local repo_dir="$1"
+
+  if [ -d "$repo_dir/.git" ]; then
+    git -C "$repo_dir" config core.fileMode false || true
+
+    if [ -n "$(git -C "$repo_dir" -c core.fileMode=false status --porcelain 2>/dev/null)" ]; then
+      warn "Repositorio local com alteracoes; pulando git pull para nao sobrescrever."
+    elif ! git -C "$repo_dir" -c core.fileMode=false pull --ff-only 2>/dev/null; then
+      warn "Nao foi possivel atualizar o repositorio."
+    fi
+
+    ok "Repositorio pronto em $repo_dir"
+    return
+  fi
+
+  git clone https://github.com/edson-guillen/setup-gq-oc.git "$repo_dir"
+  git -C "$repo_dir" config core.fileMode false || true
+  ok "Repositorio clonado em $repo_dir"
+}
 
 echo -e ""
 echo -e "${CYAN}==================================================${NC}"
@@ -41,6 +63,7 @@ MISSING=()
 for cmd in curl git unzip; do
   command -v "$cmd" &>/dev/null || MISSING+=("$cmd")
 done
+command -v rg &>/dev/null || MISSING+=("ripgrep")
 if [ ${#MISSING[@]} -gt 0 ]; then
   warn "Instalando: ${MISSING[*]}"
   if command -v apt-get &>/dev/null; then
@@ -51,7 +74,7 @@ if [ ${#MISSING[@]} -gt 0 ]; then
     err "Instale manualmente: ${MISSING[*]}"; exit 1
   fi
 fi
-ok "curl, git, unzip disponíveis."
+ok "curl, git, unzip e ripgrep disponiveis."
 
 # -------------------------------------------
 # 3. Node.js — via NodeSource apt (nunca nvm em scripts não-interativos)
@@ -124,9 +147,18 @@ ok "gqwen-auth instalado."
 # 6. OpenClaude
 # -------------------------------------------
 step "Instalando OpenClaude..."
-if ! npm install -g openclaude 2>/dev/null; then
+if npm list -g --depth=0 openclaude &>/dev/null; then
+  warn "Removendo pacote legado 'openclaude'..."
+  npm uninstall -g openclaude 2>/dev/null || sudo npm uninstall -g openclaude 2>/dev/null || true
+fi
+
+if ! npm install -g "$OPENCLAUDE_PACKAGE" 2>/dev/null; then
   warn "Tentando com sudo..."
-  sudo npm install -g openclaude
+  sudo npm install -g "$OPENCLAUDE_PACKAGE"
+fi
+if ! command -v openclaude &>/dev/null; then
+  err "OpenClaude nao encontrado apos instalacao."
+  exit 1
 fi
 ok "OpenClaude instalado."
 
@@ -135,14 +167,7 @@ ok "OpenClaude instalado."
 # -------------------------------------------
 step "Verificando repositório setup-gq-oc..."
 REPO_DIR="$HOME/setup-gq-oc"
-if [ -d "$REPO_DIR/.git" ]; then
-  git -C "$REPO_DIR" pull --ff-only 2>/dev/null || warn "Não foi possível atualizar o repositório."
-  ok "Repositório atualizado em $REPO_DIR"
-else
-  git clone https://github.com/edson-guillen/setup-gq-oc.git "$REPO_DIR"
-  ok "Repositório clonado em $REPO_DIR"
-fi
-chmod +x "$REPO_DIR"/scripts/*.sh
+sync_repo "$REPO_DIR"
 
 # -------------------------------------------
 # 8. Variáveis de ambiente
@@ -179,9 +204,7 @@ alias qoc-status="gqwen status"
 alias qoc-doctor="bash ~/setup-gq-oc/scripts/doctor.sh"
 
 qoc-start() {
-  local project="${1:-$(pwd)}"
-  gqwen serve on 2>/dev/null || true
-  cd "$project" && openclaude
+  bash "$HOME/setup-gq-oc/scripts/start.sh" "${1:-$(pwd)}"
 }
 # --- fim setup-gq-oc ---
 ALIASEOF

@@ -28,6 +28,7 @@ bun uninstall -g gqwen-auth 2>/dev/null || true
 ok "gqwen-auth removido."
 
 step "Removendo OpenClaude..."
+npm uninstall -g @gitlawb/openclaude 2>/dev/null || sudo npm uninstall -g @gitlawb/openclaude 2>/dev/null || true
 npm uninstall -g openclaude 2>/dev/null || sudo npm uninstall -g openclaude 2>/dev/null || true
 ok "OpenClaude removido."
 
