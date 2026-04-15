@@ -4,19 +4,20 @@
 # Remove gqwen-auth, OpenClaude e configurações de forma limpa.
 # =============================================================
 
-set -euo pipefail
+# Sem -u: evita erros em variáveis internas de scripts externos
+set -eo pipefail
 
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; RED='\033[0;31m'; NC='\033[0m'
 step() { echo -e "\n${CYAN}==>${NC} $1"; }
-ok()   { echo -e "  ${GREEN}✓${NC} $1"; }
-warn() { echo -e "  ${YELLOW}⚠${NC}  $1"; }
+ok()   { echo -e "  ${GREEN}\xE2\x9C\x93${NC} $1"; }
+warn() { echo -e "  ${YELLOW}!${NC}  $1"; }
 
 export PATH="$HOME/.bun/bin:$PATH"
 
 echo ""
-echo -e "${YELLOW}╔══════════════════════════════════════════════╗${NC}"
-echo -e "${YELLOW}║   🗑️  setup-gq-oc  uninstall.sh             ║${NC}"
-echo -e "${YELLOW}╚══════════════════════════════════════════════╝${NC}"
+echo -e "${YELLOW}=================================================${NC}"
+echo -e "${YELLOW}   setup-gq-oc  uninstall.sh${NC}"
+echo -e "${YELLOW}=================================================${NC}"
 echo ""
 
 step "Parando proxy gqwen-auth..."
@@ -45,20 +46,20 @@ else
 fi
 
 # Remover aliases e linhas do shell RC
-SHELL_RC="$HOME/.zshrc"
-[ -f "$HOME/.bashrc" ] && SHELL_RC="$HOME/.bashrc"
-[ -f "$HOME/.zshrc" ]  && SHELL_RC="$HOME/.zshrc"
+SHELL_RC="$HOME/.bashrc"
+[ -f "$HOME/.zshrc" ] && SHELL_RC="$HOME/.zshrc"
 
 if grep -q 'setup-gq-oc\|qwen-openclaude\|qoc-start\|qoc-stop\|qoc-status\|qoc-doctor' "$SHELL_RC" 2>/dev/null; then
-  # Remover blocos setup-gq-oc do shell RC
-  sed -i '/# setup-gq-oc/,/# ─\{40\}/d' "$SHELL_RC" 2>/dev/null || true
+  sed -i '/# setup-gq-oc/,/# --- fim setup-gq-oc/d' "$SHELL_RC" 2>/dev/null || true
   sed -i '/qwen-openclaude\.env/d' "$SHELL_RC" 2>/dev/null || true
+  sed -i '/# setup-gq-oc$/d' "$SHELL_RC" 2>/dev/null || true
   sed -i '/qoc-start\|qoc-stop\|qoc-status\|qoc-doctor/d' "$SHELL_RC" 2>/dev/null || true
-  ok "Aliases qoc-* removidos de $SHELL_RC"
+  sed -i '/BUN_INSTALL/d' "$SHELL_RC" 2>/dev/null || true
+  ok "Aliases qoc-* e configurações removidos de $SHELL_RC"
 else
   warn "Nenhum alias qoc-* encontrado em $SHELL_RC"
 fi
 
 echo ""
-echo -e "${GREEN}✓${NC} Desinstalação concluída."
+echo -e "${GREEN}\xE2\x9C\x93 Desinstalação concluída.${NC}"
 echo ""
