@@ -147,9 +147,34 @@ console.log(`[done] gqwen-auth patch ready (${patched} changed, ${alreadyPatched
     Write-Ok "Patch gqwen-auth aplicado."
 }
 
+function Invoke-NativeCapture {
+    param([Parameter(Mandatory=$true)][string]$CommandLine)
+
+    $oldErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        return (& cmd.exe /d /s /c "$CommandLine 2>&1" | Out-String)
+    } finally {
+        $ErrorActionPreference = $oldErrorActionPreference
+    }
+}
+
+function Invoke-NativeInteractive {
+    param([Parameter(Mandatory=$true)][string]$CommandLine)
+
+    $oldErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        & cmd.exe /d /s /c "$CommandLine 2>&1"
+        return $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $oldErrorActionPreference
+    }
+}
+
 function Test-GqwenAccounts {
     Write-Step "Validando conectividade das contas Qwen..."
-    $testOutput = (& cmd.exe /d /c "gqwen test 2>&1" | Out-String)
+    $testOutput = Invoke-NativeCapture "gqwen test"
     if ($testOutput.Trim()) {
         Write-Host $testOutput.TrimEnd()
     }
@@ -332,7 +357,7 @@ Write-Ok "Variaveis de ambiente configuradas."
 # 8. Login OAuth e iniciar proxy
 # -------------------------------------------------------
 Write-Step "Verificando conta Qwen..."
-$accountList = gqwen list 2>$null | Out-String
+$accountList = Invoke-NativeCapture "gqwen list"
 $accountCount = Count-QwenAccounts $accountList
 $validAccountCount = 0
 
@@ -362,7 +387,11 @@ if ($accountCount -eq 0 -or $validAccountCount -eq 0) {
     Write-Host "  -------------------------------------------" -ForegroundColor Cyan
     Write-Host ""
 
-    gqwen add
+    $addExitCode = Invoke-NativeInteractive "gqwen add"
+    if ($addExitCode -ne 0) {
+        Write-Err "Falha no login Qwen (gqwen add retornou $addExitCode)."
+        exit 1
+    }
 
     $validAccountCount = Test-GqwenAccounts
     if ($validAccountCount -eq 0) {
@@ -374,7 +403,10 @@ if ($accountCount -eq 0 -or $validAccountCount -eq 0) {
 }
 
 Write-Step "Iniciando proxy gqwen-auth..."
-gqwen serve on 2>$null
+$serveOutput = Invoke-NativeCapture "gqwen serve on"
+if ($serveOutput.Trim()) {
+    Write-Host $serveOutput.TrimEnd()
+}
 Start-Sleep -Seconds 2
 
 # -------------------------------------------------------
@@ -469,7 +501,7 @@ function qoc-doctor  {
     Write-Host "`n[ gqwen-auth ]" -ForegroundColor Cyan
     if (Get-Command gqwen -ErrorAction SilentlyContinue) {
         Write-Host "   gqwen-auth instalado" -ForegroundColor Green
-        $accountList = gqwen list 2>$null | Out-String
+        $accountList = (& cmd.exe /d /s /c "gqwen list 2>&1" | Out-String)
         $accountCount = ([regex]::Matches($accountList, '(?m)^\s*[0-9]+\s+[a-f0-9]+')).Count
         if ($accountCount -gt 0) {
             Write-Host "   $accountCount conta(s) Qwen cadastrada(s)" -ForegroundColor Green
