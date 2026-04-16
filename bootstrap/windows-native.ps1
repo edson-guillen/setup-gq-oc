@@ -176,20 +176,66 @@ function Invoke-NativeInteractive {
     }
 }
 
-function Test-GqwenAccounts {
-    Write-Step "Validando conectividade das contas Qwen..."
-    $testOutput = Invoke-NativeCapture "gqwen test"
-    if ($testOutput.Trim()) {
-        Write-Host $testOutput.TrimEnd()
-    }
-
-    return ([regex]::Matches($testOutput, '(^|\s)OK(\s|$)')).Count
-}
-
 function Count-QwenAccounts {
     param([string]$AccountList)
 
     return ([regex]::Matches($AccountList, '(?m)^\s*[0-9]+\s+[a-f0-9]+')).Count
+}
+
+function Count-QwenUsableAccounts {
+    param([string]$AccountList)
+
+    $accountLines = [regex]::Matches($AccountList, '(?m)^\s*[0-9]+\s+[a-f0-9]+.*$')
+    $usable = 0
+    foreach ($match in $accountLines) {
+        $line = $match.Value
+        if ($line -match '\s(active|unknown)\s+') {
+            $usable += 1
+        }
+    }
+    return $usable
+}
+
+function Get-QwenAccountList {
+    return Invoke-NativeCapture "gqwen list"
+}
+
+function Reset-QwenAccountStatus {
+    Write-Warn "Nenhuma conta pronta. Limpando locks/status locais do gqwen-auth..."
+    $unlockOutput = Invoke-NativeCapture "gqwen unlock"
+    if ($unlockOutput.Trim()) {
+        Write-Host $unlockOutput.TrimEnd()
+    }
+}
+
+function Stop-LocalPortProcess {
+    param([int]$Port)
+
+    $pids = @()
+    try {
+        $connections = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
+        if ($connections) {
+            $pids = @($connections | Select-Object -ExpandProperty OwningProcess -Unique)
+        }
+    } catch {
+        $netstat = (& netstat -ano | Out-String)
+        $pids = @(
+            [regex]::Matches($netstat, "(?m)^\s*TCP\s+\S+:$Port\s+\S+\s+LISTENING\s+(\d+)\s*$") |
+                ForEach-Object { [int]$_.Groups[1].Value } |
+                Select-Object -Unique
+        )
+    }
+
+    foreach ($procId in $pids) {
+        if ($procId -gt 0 -and $procId -ne $PID) {
+            try {
+                Stop-Process -Id $procId -Force -ErrorAction Stop
+                Write-Warn "Processo PID $procId usando porta $Port foi encerrado."
+            } catch {
+                Write-Warn "Nao foi possivel encerrar PID $procId na porta $Port."
+            }
+        }
+    }
 }
 
 Write-Banner
@@ -385,22 +431,26 @@ Write-Ok "Variaveis de ambiente configuradas."
 # 8. Login OAuth e iniciar proxy
 # -------------------------------------------------------
 Write-Step "Verificando conta Qwen..."
-$accountList = Invoke-NativeCapture "gqwen list"
+$accountList = Get-QwenAccountList
 $accountCount = Count-QwenAccounts $accountList
-$validAccountCount = 0
+$usableAccountCount = Count-QwenUsableAccounts $accountList
 
 if ($accountCount -gt 0) {
     Write-Ok "$accountCount conta(s) Qwen ja cadastrada(s)."
-    $validAccountCount = Test-GqwenAccounts
+    if ($usableAccountCount -eq 0) {
+        Reset-QwenAccountStatus
+        $accountList = Get-QwenAccountList
+        $usableAccountCount = Count-QwenUsableAccounts $accountList
+    }
 
-    if ($validAccountCount -gt 0) {
-        Write-Ok "$validAccountCount conta(s) valida(s) para uso."
+    if ($usableAccountCount -gt 0) {
+        Write-Ok "$usableAccountCount conta(s) pronta(s) para uso."
     } else {
-        Write-Warn "Contas cadastradas, mas nenhuma respondeu com sucesso."
+        Write-Warn "Contas cadastradas, mas todas estao indisponiveis."
     }
 }
 
-if ($accountCount -eq 0 -or $validAccountCount -eq 0) {
+if ($accountCount -eq 0 -or $usableAccountCount -eq 0) {
     Write-Host ""
     if ($accountCount -eq 0) {
         Write-Warn "Nenhuma conta Qwen encontrada."
@@ -421,16 +471,25 @@ if ($accountCount -eq 0 -or $validAccountCount -eq 0) {
         exit 1
     }
 
-    $validAccountCount = Test-GqwenAccounts
-    if ($validAccountCount -eq 0) {
-        Write-Err "Login concluido, mas nenhuma conta ficou valida."
+    $accountList = Get-QwenAccountList
+    $accountCount = Count-QwenAccounts $accountList
+    $usableAccountCount = Count-QwenUsableAccounts $accountList
+    if ($usableAccountCount -eq 0) {
+        Reset-QwenAccountStatus
+        $accountList = Get-QwenAccountList
+        $usableAccountCount = Count-QwenUsableAccounts $accountList
+    }
+
+    if ($usableAccountCount -eq 0) {
+        Write-Err "Login concluido, mas nenhuma conta ficou pronta para uso."
         exit 1
     }
 
-    Write-Ok "$validAccountCount conta(s) valida(s) para uso."
+    Write-Ok "$usableAccountCount conta(s) pronta(s) para uso."
 }
 
 Write-Step "Iniciando proxy gqwen-auth..."
+Stop-LocalPortProcess -Port 3099
 $serveOutput = Invoke-NativeCapture "gqwen serve on"
 if ($serveOutput.Trim()) {
     Write-Host $serveOutput.TrimEnd()
@@ -463,6 +522,32 @@ if ($proxyOk) {
     Write-Err "Proxy nao respondeu apos ${maxTries}s."
     Write-Warn "Tente manualmente: gqwen serve on"
     exit 1
+}
+
+try {
+    $health = Invoke-WebRequest -Uri "http://localhost:3099/health" -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
+    $healthJson = $health.Content | ConvertFrom-Json
+    if ([int]$healthJson.active -gt 0) {
+        Write-Ok "Proxy tem $($healthJson.active) conta(s) ativa(s)."
+    } else {
+        Write-Warn "Proxy sem conta ativa. Limpando locks/status locais e reiniciando proxy..."
+        Reset-QwenAccountStatus
+        Stop-LocalPortProcess -Port 3099
+        $restartOutput = Invoke-NativeCapture "gqwen serve on"
+        if ($restartOutput.Trim()) {
+            Write-Host $restartOutput.TrimEnd()
+        }
+        Start-Sleep -Seconds 2
+        $health = Invoke-WebRequest -Uri "http://localhost:3099/health" -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
+        $healthJson = $health.Content | ConvertFrom-Json
+        if ([int]$healthJson.active -le 0) {
+            Write-Err "Proxy iniciou, mas nenhuma conta ficou ativa."
+            exit 1
+        }
+        Write-Ok "Proxy tem $($healthJson.active) conta(s) ativa(s)."
+    }
+} catch {
+    Write-Warn "Nao foi possivel validar /health do proxy. Seguindo com /v1/models OK."
 }
 
 # -------------------------------------------------------

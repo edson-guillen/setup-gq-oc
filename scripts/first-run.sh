@@ -34,28 +34,31 @@ echo -e "${CYAN}=================================================${NC}"
 
 # -------------------------------------------
 # 1. Verificar se já existe conta Qwen
-#    Se existir conta antiga inválida, força novo login
+#    Evita `gqwen test`: ele marca contas novas como unavailable em alguns ambientes.
 # -------------------------------------------
 step "Verificando contas Qwen cadastradas..."
-ACCOUNT_COUNT=$(gqwen list 2>/dev/null | grep -E '^\s*[0-9]+\s+[a-f0-9]+' | wc -l || echo 0)
-VALID_ACCOUNT_COUNT=0
+ACCOUNT_LIST=$(gqwen list 2>/dev/null || true)
+ACCOUNT_COUNT=$(printf '%s\n' "$ACCOUNT_LIST" | grep -E '^\s*[0-9]+\s+[a-f0-9]+' | wc -l | tr -d '[:space:]')
+USABLE_ACCOUNT_COUNT=$(printf '%s\n' "$ACCOUNT_LIST" | grep -E '^\s*[0-9]+\s+[a-f0-9]+.*\s(active|unknown)\s+' | wc -l | tr -d '[:space:]')
 
 if [ "$ACCOUNT_COUNT" -gt 0 ]; then
   ok "$ACCOUNT_COUNT conta(s) Qwen já cadastrada(s)."
 
-  step "Validando conectividade das contas Qwen..."
-  TEST_OUTPUT=$(gqwen test 2>&1 || true)
-  [ -n "$TEST_OUTPUT" ] && printf '%s\n' "$TEST_OUTPUT"
-  VALID_ACCOUNT_COUNT=$(printf '%s\n' "$TEST_OUTPUT" | grep -E ' OK ' | wc -l | tr -d '[:space:]')
+  if [ "$USABLE_ACCOUNT_COUNT" -eq 0 ]; then
+    warn "Nenhuma conta pronta. Limpando locks/status locais do gqwen-auth..."
+    gqwen unlock || true
+    ACCOUNT_LIST=$(gqwen list 2>/dev/null || true)
+    USABLE_ACCOUNT_COUNT=$(printf '%s\n' "$ACCOUNT_LIST" | grep -E '^\s*[0-9]+\s+[a-f0-9]+.*\s(active|unknown)\s+' | wc -l | tr -d '[:space:]')
+  fi
 
-  if [ "$VALID_ACCOUNT_COUNT" -gt 0 ]; then
-    ok "$VALID_ACCOUNT_COUNT conta(s) válida(s) para uso."
+  if [ "$USABLE_ACCOUNT_COUNT" -gt 0 ]; then
+    ok "$USABLE_ACCOUNT_COUNT conta(s) pronta(s) para uso."
   else
-    warn "Contas cadastradas, mas nenhuma respondeu com sucesso."
+    warn "Contas cadastradas, mas todas estão indisponíveis."
   fi
 fi
 
-if [ "$ACCOUNT_COUNT" -eq 0 ] || [ "$VALID_ACCOUNT_COUNT" -eq 0 ]; then
+if [ "$ACCOUNT_COUNT" -eq 0 ] || [ "$USABLE_ACCOUNT_COUNT" -eq 0 ]; then
   echo ""
   if [ "$ACCOUNT_COUNT" -eq 0 ]; then
     warn "Nenhuma conta Qwen encontrada."
@@ -71,24 +74,30 @@ if [ "$ACCOUNT_COUNT" -eq 0 ] || [ "$VALID_ACCOUNT_COUNT" -eq 0 ]; then
   echo ""
   gqwen add
 
-  step "Validando nova autenticação..."
-  TEST_OUTPUT=$(gqwen test 2>&1 || true)
-  [ -n "$TEST_OUTPUT" ] && printf '%s\n' "$TEST_OUTPUT"
-  VALID_ACCOUNT_COUNT=$(printf '%s\n' "$TEST_OUTPUT" | grep -E ' OK ' | wc -l | tr -d '[:space:]')
+  ACCOUNT_LIST=$(gqwen list 2>/dev/null || true)
+  ACCOUNT_COUNT=$(printf '%s\n' "$ACCOUNT_LIST" | grep -E '^\s*[0-9]+\s+[a-f0-9]+' | wc -l | tr -d '[:space:]')
+  USABLE_ACCOUNT_COUNT=$(printf '%s\n' "$ACCOUNT_LIST" | grep -E '^\s*[0-9]+\s+[a-f0-9]+.*\s(active|unknown)\s+' | wc -l | tr -d '[:space:]')
 
-  if [ "$VALID_ACCOUNT_COUNT" -eq 0 ]; then
-    err "Login concluído, mas nenhuma conta ficou válida."
+  if [ "$USABLE_ACCOUNT_COUNT" -eq 0 ]; then
+    warn "Login salvo, mas nenhuma conta pronta. Limpando locks/status locais..."
+    gqwen unlock || true
+    ACCOUNT_LIST=$(gqwen list 2>/dev/null || true)
+    USABLE_ACCOUNT_COUNT=$(printf '%s\n' "$ACCOUNT_LIST" | grep -E '^\s*[0-9]+\s+[a-f0-9]+.*\s(active|unknown)\s+' | wc -l | tr -d '[:space:]')
+  fi
+
+  if [ "$USABLE_ACCOUNT_COUNT" -eq 0 ]; then
+    err "Login concluído, mas nenhuma conta ficou pronta para uso."
     exit 1
   fi
 
-  ok "$VALID_ACCOUNT_COUNT conta(s) válida(s) para uso."
+  ok "$USABLE_ACCOUNT_COUNT conta(s) pronta(s) para uso."
 fi
 
 # -------------------------------------------
 # 2. Iniciar proxy
 # -------------------------------------------
 step "Iniciando proxy gqwen-auth..."
-gqwen serve on 2>/dev/null || true
+gqwen serve restart 2>/dev/null || gqwen serve on 2>/dev/null || true
 sleep 2
 
 # -------------------------------------------
@@ -113,19 +122,24 @@ if [ $TRY -eq $MAX_TRIES ]; then
 fi
 
 # -------------------------------------------
-# 4. Testar geração de texto
+# 4. Validar proxy sem chamar modelo upstream
 # -------------------------------------------
-step "Testando geração com ${OPENAI_MODEL:-qwen3-coder-plus}..."
-TEST_RESPONSE=$(curl -sf http://localhost:3099/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d "{\"model\":\"${OPENAI_MODEL:-qwen3-coder-plus}\",\"messages\":[{\"role\":\"user\",\"content\":\"Say just: OK\"}],\"max_tokens\":10}" \
-  2>/dev/null) || true
-
-if echo "$TEST_RESPONSE" | grep -qi 'choices'; then
-  ok "Modelo respondeu com sucesso. API funcionando!"
+step "Validando contas ativas no proxy..."
+HEALTH_RESPONSE=$(curl -sf http://localhost:3099/health 2>/dev/null || true)
+if echo "$HEALTH_RESPONSE" | grep -Eq '"active":[1-9]'; then
+  ok "Proxy tem conta ativa."
 else
-  warn "Não foi possível validar a resposta do modelo."
-  warn "Isso pode ser normal na primeira execução. Verifique com: gqwen status"
+  warn "Proxy respondeu, mas nao reportou conta ativa. Limpando locks/status locais..."
+  gqwen unlock || true
+  gqwen serve restart 2>/dev/null || true
+  sleep 2
+  HEALTH_RESPONSE=$(curl -sf http://localhost:3099/health 2>/dev/null || true)
+  if echo "$HEALTH_RESPONSE" | grep -Eq '"active":[1-9]'; then
+    ok "Proxy tem conta ativa."
+  else
+    err "Proxy iniciou, mas nenhuma conta ficou ativa."
+    exit 1
+  fi
 fi
 
 # -------------------------------------------
