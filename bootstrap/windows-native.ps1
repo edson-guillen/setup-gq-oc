@@ -149,7 +149,7 @@ console.log(`[done] gqwen-auth patch ready (${patched} changed, ${alreadyPatched
 
 function Test-GqwenAccounts {
     Write-Step "Validando conectividade das contas Qwen..."
-    $testOutput = (& gqwen test 2>&1 | Out-String)
+    $testOutput = (& cmd.exe /d /c "gqwen test 2>&1" | Out-String)
     if ($testOutput.Trim()) {
         Write-Host $testOutput.TrimEnd()
     }
