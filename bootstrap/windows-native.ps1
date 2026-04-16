@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    setup-gq-oc — Bootstrap Windows Nativo
+    setup-gq-oc  Bootstrap Windows Nativo
     Instala gqwen-auth + OpenClaude diretamente no Windows (sem WSL).
 
 .USAGE
@@ -29,7 +29,7 @@ function Write-Banner {
 }
 
 # -------------------------------------------------------
-# Refresh PATH da sessão atual
+# Refresh PATH da sesso atual
 # -------------------------------------------------------
 function Refresh-Path {
     $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
@@ -60,7 +60,7 @@ function Invoke-GqwenPatch {
     if ($repoRoot) {
         & node (Join-Path $repoRoot 'scripts\patch-gqwen-auth.mjs')
     } else {
-@'
+        $patchScript = @'
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -135,7 +135,8 @@ if (patched === 0 && alreadyPatched === 0) {
 }
 
 console.log(`[done] gqwen-auth patch ready (${patched} changed, ${alreadyPatched} already patched).`);
-'@ | node -
+'@
+        $patchScript | node -
     }
 
     if ($LASTEXITCODE -ne 0) {
@@ -156,23 +157,29 @@ function Test-GqwenAccounts {
     return ([regex]::Matches($testOutput, '(^|\s)OK(\s|$)')).Count
 }
 
+function Count-QwenAccounts {
+    param([string]$AccountList)
+
+    return ([regex]::Matches($AccountList, '(?m)^\s*[0-9]+\s+[a-f0-9]+')).Count
+}
+
 Write-Banner
 
 # -------------------------------------------------------
-# 1. Verificar privilégios de Administrador
+# 1. Verificar privilgios de Administrador
 # -------------------------------------------------------
-Write-Step "Verificando privilégios..."
+Write-Step "Verificando privilgios..."
 $currentPrincipal = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
 if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     Write-Err "Execute o PowerShell como Administrador."
-    Write-Host "  Clique com botão direito no PowerShell > 'Executar como administrador'"
+    Write-Host "  Clique com botao direito no PowerShell > 'Executar como administrador'"
     Write-Host "  Depois rode o comando novamente." -ForegroundColor Yellow
     exit 1
 }
 Write-Ok "Rodando como Administrador."
 
 # -------------------------------------------------------
-# 2. Verificar versão do Windows
+# 2. Verificar verso do Windows
 # -------------------------------------------------------
 Write-Step "Verificando compatibilidade do Windows..."
 $build = [System.Environment]::OSVersion.Version.Build
@@ -183,7 +190,7 @@ if ($build -lt 10240) {
     Write-Err "Windows build $build detectado. Requer Windows 10 build 10240+ ou Windows 11."
     exit 1
 }
-Write-Ok "$winVer (build $build) — compatível."
+Write-Ok "$winVer (build $build) - compativel."
 
 # -------------------------------------------------------
 # 3. Instalar Node.js via winget
@@ -195,7 +202,7 @@ try {
     $nodeVersion = node --version 2>$null
     if ($LASTEXITCODE -eq 0) {
         $nodeInstalled = $true
-        Write-Ok "Node.js já instalado: $nodeVersion"
+        Write-Ok "Node.js ja instalado: $nodeVersion"
     }
 } catch { $nodeInstalled = $false }
 
@@ -206,34 +213,35 @@ if (-not $nodeInstalled) {
         
         # Refresh PATH e adicionar caminhos comuns do Node.js
         Refresh-Path
+        $programFilesX86 = [System.Environment]::GetEnvironmentVariable('ProgramFiles(x86)')
         $nodePaths = @(
             "$env:ProgramFiles\\nodejs",
-            "${env:ProgramFiles(x86)}\\nodejs",
+            "$programFilesX86\\nodejs",
             "$env:APPDATA\\npm"
         )
         foreach ($p in $nodePaths) {
             if ((Test-Path $p) -and ($env:Path -notlike "*$p*")) {
-                $env:Path = "$p;$env:Path"
+                $env:Path = $p + ";" + $env:Path
             }
         }
         
         Start-Sleep -Seconds 2
         
-        # Verificar se node está acessível agora
+        # Verificar se node esta acessivel agora
         try {
             $nodeVersion = node --version 2>$null
             if ($LASTEXITCODE -eq 0) {
                 Write-Ok "Node.js instalado: $nodeVersion"
             } else {
-                throw "Node não encontrado no PATH"
+                throw "Node nao encontrado no PATH"
             }
         } catch {
-            Write-Err "Node.js foi instalado mas não está acessível."
+            Write-Err "Node.js foi instalado mas nao esta acessivel."
             Write-Host "  Execute em um novo terminal: node --version" -ForegroundColor Yellow
             exit 1
         }
     } else {
-        Write-Err "winget não encontrado. Instale Node.js manualmente: https://nodejs.org"
+        Write-Err "winget nao encontrado. Instale Node.js manualmente: https://nodejs.org"
         exit 1
     }
 }
@@ -242,7 +250,7 @@ try {
     $npmVersion = npm --version 2>$null
     Write-Ok "npm $npmVersion"
 } catch {
-    Write-Err "npm não encontrado no PATH."
+    Write-Err "npm nao encontrado no PATH."
     exit 1
 }
 
@@ -255,7 +263,7 @@ try {
     $bunVersion = bun --version 2>$null
     if ($LASTEXITCODE -eq 0) {
         $bunInstalled = $true
-        Write-Ok "Bun já instalado: $bunVersion"
+        Write-Ok "Bun ja instalado: $bunVersion"
     }
 } catch { $bunInstalled = $false }
 
@@ -267,11 +275,11 @@ if (-not $bunInstalled) {
     # Atualizar PATH para incluir Bun
     $bunPath = "$env:USERPROFILE\\.bun\\bin"
     if (Test-Path $bunPath) {
-        $env:Path = "$bunPath;$env:Path"
+        $env:Path = $bunPath + ";" + $env:Path
         $bunVersion = & "$bunPath\\bun.exe" --version 2>$null
         Write-Ok "Bun instalado: $bunVersion"
     } else {
-        Write-Err "Bun não foi instalado corretamente."
+        Write-Err "Bun nao foi instalado corretamente."
         exit 1
     }
 }
@@ -304,36 +312,36 @@ Write-Ok "OpenClaude instalado."
 Invoke-GqwenPatch
 
 # -------------------------------------------------------
-# 7. Configurar variáveis de ambiente (usuário)
+# 7. Configurar variveis de ambiente (usurio)
 # -------------------------------------------------------
-Write-Step "Configurando variáveis de ambiente..."
+Write-Step "Configurando variveis de ambiente..."
 [System.Environment]::SetEnvironmentVariable("CLAUDE_CODE_USE_OPENAI", "1", "User")
 [System.Environment]::SetEnvironmentVariable("OPENAI_BASE_URL", "http://localhost:3099/v1", "User")
 [System.Environment]::SetEnvironmentVariable("OPENAI_API_KEY", "gqwen-proxy", "User")
 [System.Environment]::SetEnvironmentVariable("OPENAI_MODEL", "qwen3-coder-plus", "User")
 
-# Aplicar na sessão atual
+# Aplicar na sesso atual
 $env:CLAUDE_CODE_USE_OPENAI = "1"
 $env:OPENAI_BASE_URL = "http://localhost:3099/v1"
 $env:OPENAI_API_KEY = "gqwen-proxy"
 $env:OPENAI_MODEL = "qwen3-coder-plus"
 
-Write-Ok "Variáveis de ambiente configuradas."
+Write-Ok "Variaveis de ambiente configuradas."
 
 # -------------------------------------------------------
 # 8. Login OAuth e iniciar proxy
 # -------------------------------------------------------
 Write-Step "Verificando conta Qwen..."
 $accountList = gqwen list 2>$null | Out-String
-$accountCount = ($accountList | Select-String -Pattern '^\\s*[0-9]+\\s+[a-f0-9]+' -AllMatches).Matches.Count
+$accountCount = Count-QwenAccounts $accountList
 $validAccountCount = 0
 
 if ($accountCount -gt 0) {
-    Write-Ok "$accountCount conta(s) Qwen já cadastrada(s)."
+    Write-Ok "$accountCount conta(s) Qwen ja cadastrada(s)."
     $validAccountCount = Test-GqwenAccounts
 
     if ($validAccountCount -gt 0) {
-        Write-Ok "$validAccountCount conta(s) válida(s) para uso."
+        Write-Ok "$validAccountCount conta(s) valida(s) para uso."
     } else {
         Write-Warn "Contas cadastradas, mas nenhuma respondeu com sucesso."
     }
@@ -344,13 +352,13 @@ if ($accountCount -eq 0 -or $validAccountCount -eq 0) {
     if ($accountCount -eq 0) {
         Write-Warn "Nenhuma conta Qwen encontrada."
     } else {
-        Write-Warn "Necessário renovar autenticação no Qwen."
+        Write-Warn "Necessario renovar autenticacao no Qwen."
     }
     Write-Host ""
     Write-Host "  -------------------------------------------" -ForegroundColor Cyan
-    Write-Host "  Ação necessária: login no browser" -ForegroundColor Yellow
-    Write-Host "  O browser será aberto para autenticação OAuth no qwen.ai."
-    Write-Host "  Faça login com sua conta gratuita (não precisa de cartão)."
+    Write-Host "  Acao necessaria: login no browser" -ForegroundColor Yellow
+    Write-Host "  O browser sera aberto para autenticacao OAuth no qwen.ai."
+    Write-Host "  Faca login com sua conta gratuita (nao precisa de cartao)."
     Write-Host "  -------------------------------------------" -ForegroundColor Cyan
     Write-Host ""
 
@@ -358,11 +366,11 @@ if ($accountCount -eq 0 -or $validAccountCount -eq 0) {
 
     $validAccountCount = Test-GqwenAccounts
     if ($validAccountCount -eq 0) {
-        Write-Err "Login concluído, mas nenhuma conta ficou válida."
+        Write-Err "Login concluido, mas nenhuma conta ficou valida."
         exit 1
     }
 
-    Write-Ok "$validAccountCount conta(s) válida(s) para uso."
+    Write-Ok "$validAccountCount conta(s) valida(s) para uso."
 }
 
 Write-Step "Iniciando proxy gqwen-auth..."
@@ -392,13 +400,13 @@ while ($try -lt $maxTries) {
 if ($proxyOk) {
     Write-Ok "Proxy respondendo em http://localhost:3099/v1"
 } else {
-    Write-Err "Proxy não respondeu após ${maxTries}s."
+    Write-Err "Proxy nao respondeu apos ${maxTries}s."
     Write-Warn "Tente manualmente: gqwen serve on"
     exit 1
 }
 
 # -------------------------------------------------------
-# 10. Criar funções PowerShell para uso diário
+# 10. Criar funes PowerShell para uso dirio
 # -------------------------------------------------------
 Write-Step "Criando comandos qoc-* no PowerShell..."
 
@@ -412,7 +420,7 @@ $aliases = @'
 function qoc-start {
     param([string]$ProjectPath = "")
     
-    # Verificar se proxy está rodando
+    # Verificar se proxy est rodando
     try {
         $null = Invoke-WebRequest -Uri "http://localhost:3099/v1/models" -UseBasicParsing -TimeoutSec 1 -ErrorAction Stop
     } catch {
@@ -436,74 +444,74 @@ function qoc-doctor  {
     Write-Host "   setup-gq-oc  doctor (Windows)" -ForegroundColor Cyan
     Write-Host "==================================================" -ForegroundColor Cyan
     
-    Write-Host "`n[ Sistema ]" -ForegroundColor Bold
-    Write-Host "  · SO: Windows $(${env:COMPUTERNAME})"
+    Write-Host "`n[ Sistema ]" -ForegroundColor Cyan
+    Write-Host "   SO: Windows $(${env:COMPUTERNAME})"
     
-    Write-Host "`n[ Ferramentas ]" -ForegroundColor Bold
+    Write-Host "`n[ Ferramentas ]" -ForegroundColor Cyan
     if (Get-Command bun -ErrorAction SilentlyContinue) {
-        Write-Host "  ✓ Bun: $(bun --version)" -ForegroundColor Green
+        Write-Host "   Bun: $(bun --version)" -ForegroundColor Green
     } else {
-        Write-Host "  ✗ Bun não encontrado" -ForegroundColor Red
+        Write-Host "   Bun nao encontrado" -ForegroundColor Red
     }
     
     if (Get-Command node -ErrorAction SilentlyContinue) {
-        Write-Host "  ✓ Node.js: $(node --version)" -ForegroundColor Green
+        Write-Host "   Node.js: $(node --version)" -ForegroundColor Green
     } else {
-        Write-Host "  ✗ Node.js não encontrado" -ForegroundColor Red
+        Write-Host "   Node.js nao encontrado" -ForegroundColor Red
     }
     
     if (Get-Command npm -ErrorAction SilentlyContinue) {
-        Write-Host "  ✓ npm: $(npm --version)" -ForegroundColor Green
+        Write-Host "   npm: $(npm --version)" -ForegroundColor Green
     } else {
-        Write-Host "  ✗ npm não encontrado" -ForegroundColor Red
+        Write-Host "   npm nao encontrado" -ForegroundColor Red
     }
     
-    Write-Host "`n[ gqwen-auth ]" -ForegroundColor Bold
+    Write-Host "`n[ gqwen-auth ]" -ForegroundColor Cyan
     if (Get-Command gqwen -ErrorAction SilentlyContinue) {
-        Write-Host "  ✓ gqwen-auth instalado" -ForegroundColor Green
+        Write-Host "   gqwen-auth instalado" -ForegroundColor Green
         $accountList = gqwen list 2>$null | Out-String
-        $accountCount = ($accountList | Select-String -Pattern '^\\s*[0-9]+\\s+[a-f0-9]+' -AllMatches).Matches.Count
+        $accountCount = ([regex]::Matches($accountList, '(?m)^\s*[0-9]+\s+[a-f0-9]+')).Count
         if ($accountCount -gt 0) {
-            Write-Host "  ✓ $accountCount conta(s) Qwen cadastrada(s)" -ForegroundColor Green
+            Write-Host "   $accountCount conta(s) Qwen cadastrada(s)" -ForegroundColor Green
         } else {
-            Write-Host "  ✗ Nenhuma conta Qwen" -ForegroundColor Red
+            Write-Host "   Nenhuma conta Qwen" -ForegroundColor Red
         }
     } else {
-        Write-Host "  ✗ gqwen-auth não encontrado" -ForegroundColor Red
+        Write-Host "   gqwen-auth nao encontrado" -ForegroundColor Red
     }
     
-    Write-Host "`n[ Proxy ]" -ForegroundColor Bold
+    Write-Host "`n[ Proxy ]" -ForegroundColor Cyan
     try {
         $response = Invoke-WebRequest -Uri "http://localhost:3099/v1/models" -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
-        Write-Host "  ✓ Proxy rodando em http://localhost:3099/v1" -ForegroundColor Green
+        Write-Host "   Proxy rodando em http://localhost:3099/v1" -ForegroundColor Green
     } catch {
-        Write-Host "  ✗ Proxy não responde" -ForegroundColor Red
+        Write-Host "   Proxy nao responde" -ForegroundColor Red
     }
     
-    Write-Host "`n[ OpenClaude ]" -ForegroundColor Bold
+    Write-Host "`n[ OpenClaude ]" -ForegroundColor Cyan
     if (Get-Command openclaude -ErrorAction SilentlyContinue) {
-        Write-Host "  ✓ openclaude instalado" -ForegroundColor Green
+        Write-Host "   openclaude instalado" -ForegroundColor Green
     } else {
-        Write-Host "  ✗ openclaude não encontrado" -ForegroundColor Red
+        Write-Host "   openclaude nao encontrado" -ForegroundColor Red
     }
     
-    Write-Host "`n[ Variáveis de Ambiente ]" -ForegroundColor Bold
+    Write-Host "`n[ Variaveis de Ambiente ]" -ForegroundColor Cyan
     if ($env:CLAUDE_CODE_USE_OPENAI -eq "1") {
-        Write-Host "  ✓ CLAUDE_CODE_USE_OPENAI=1" -ForegroundColor Green
+        Write-Host "   CLAUDE_CODE_USE_OPENAI=1" -ForegroundColor Green
     } else {
-        Write-Host "  ✗ CLAUDE_CODE_USE_OPENAI não definido" -ForegroundColor Red
+        Write-Host "   CLAUDE_CODE_USE_OPENAI nao definido" -ForegroundColor Red
     }
     
     if ($env:OPENAI_BASE_URL) {
-        Write-Host "  ✓ OPENAI_BASE_URL=$env:OPENAI_BASE_URL" -ForegroundColor Green
+        Write-Host "   OPENAI_BASE_URL=$env:OPENAI_BASE_URL" -ForegroundColor Green
     } else {
-        Write-Host "  ✗ OPENAI_BASE_URL não definido" -ForegroundColor Red
+        Write-Host "   OPENAI_BASE_URL nao definido" -ForegroundColor Red
     }
     
     if ($env:OPENAI_MODEL) {
-        Write-Host "  ✓ OPENAI_MODEL=$env:OPENAI_MODEL" -ForegroundColor Green
+        Write-Host "   OPENAI_MODEL=$env:OPENAI_MODEL" -ForegroundColor Green
     } else {
-        Write-Host "  ⚠  OPENAI_MODEL não definido (padrão: qwen3-coder-plus)" -ForegroundColor Yellow
+        Write-Host "    OPENAI_MODEL nao definido (padrao: qwen3-coder-plus)" -ForegroundColor Yellow
     }
     
     Write-Host ""
@@ -516,15 +524,15 @@ if ($null -eq $currentProfile -or -not $currentProfile.Contains('setup-gq-oc ali
     Add-Content -Path $PROFILE -Value $aliases
     Write-Ok "Comandos qoc-* adicionados ao perfil PowerShell."
 } else {
-    Write-Ok "Comandos qoc-* já presentes no perfil PowerShell."
+    Write-Ok "Comandos qoc-* ja presentes no perfil PowerShell."
 }
 
 # -------------------------------------------------------
-# Concluído
+# Concludo
 # -------------------------------------------------------
 Write-Host ""
 Write-Host "  +------------------------------------------+" -ForegroundColor Green
-Write-Host "  |   ✓  Setup concluído! (Windows nativo)  |" -ForegroundColor Green
+Write-Host "  |   OK  Setup concluido! (Windows nativo) |" -ForegroundColor Green
 Write-Host "  +------------------------------------------+" -ForegroundColor Green
 Write-Host ""
 Write-Host "  Abra um novo terminal PowerShell e use:" -ForegroundColor Cyan
@@ -534,6 +542,6 @@ Write-Host "    qoc-stop               # para o proxy" -ForegroundColor White
 Write-Host "    qoc-status             # quota e tokens" -ForegroundColor White
 Write-Host "    qoc-doctor             # diagnostico" -ForegroundColor White
 Write-Host ""
-Write-Host "  Variáveis de ambiente configuradas permanentemente." -ForegroundColor Gray
+Write-Host "  Variaveis de ambiente configuradas permanentemente." -ForegroundColor Gray
 Write-Host "  Para alterar modelo: `$env:OPENAI_MODEL='qwen3-coder-flash'" -ForegroundColor Gray
 Write-Host ""
