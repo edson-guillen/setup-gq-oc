@@ -39,7 +39,7 @@ if ! command -v openclaude &>/dev/null; then
 fi
 
 # Garantir que há pelo menos uma conta cadastrada
-ACCOUNT_COUNT=$(gqwen list 2>/dev/null | grep -c '@' || echo 0)
+ACCOUNT_COUNT=$(gqwen list 2>/dev/null | grep -E '^\s*[0-9]+\s+[a-f0-9]+' | wc -l || echo 0)
 if [ "$ACCOUNT_COUNT" -eq 0 ]; then
   warn "Nenhuma conta Qwen encontrada. Iniciando login..."
   gqwen add

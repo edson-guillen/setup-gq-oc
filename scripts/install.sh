@@ -170,6 +170,16 @@ REPO_DIR="$HOME/setup-gq-oc"
 sync_repo "$REPO_DIR"
 
 # -------------------------------------------
+# 7b. Patch de compatibilidade do gqwen-auth
+# -------------------------------------------
+step "Aplicando patch de compatibilidade no gqwen-auth..."
+if ! node "$REPO_DIR/scripts/patch-gqwen-auth.mjs"; then
+  err "Falha ao aplicar patch no gqwen-auth."
+  exit 1
+fi
+ok "Patch gqwen-auth aplicado."
+
+# -------------------------------------------
 # 8. Variáveis de ambiente
 # -------------------------------------------
 step "Configurando variáveis de ambiente..."

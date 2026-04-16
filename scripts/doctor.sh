@@ -91,7 +91,7 @@ else
   fail "gqwen-auth não encontrado. Execute: bun install -g gqwen-auth"
 fi
 
-ACCOUNT_COUNT=$(gqwen list 2>/dev/null | grep -c '@' || echo 0)
+ACCOUNT_COUNT=$(gqwen list 2>/dev/null | grep -E '^\s*[0-9]+\s+[a-f0-9]+' | wc -l || echo 0)
 if [ "$ACCOUNT_COUNT" -gt 0 ]; then
   check "$ACCOUNT_COUNT conta(s) Qwen cadastrada(s)."
 else

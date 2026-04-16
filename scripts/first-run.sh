@@ -34,16 +34,34 @@ echo -e "${CYAN}=================================================${NC}"
 
 # -------------------------------------------
 # 1. Verificar se já existe conta Qwen
-# CORREÇÃO: detecta contas por linhas numeradas, não por '@'
+#    Se existir conta antiga inválida, força novo login
 # -------------------------------------------
 step "Verificando contas Qwen cadastradas..."
 ACCOUNT_COUNT=$(gqwen list 2>/dev/null | grep -E '^\s*[0-9]+\s+[a-f0-9]+' | wc -l || echo 0)
+VALID_ACCOUNT_COUNT=0
 
 if [ "$ACCOUNT_COUNT" -gt 0 ]; then
-  ok "$ACCOUNT_COUNT conta(s) Qwen já cadastrada(s). Pulando login."
-else
+  ok "$ACCOUNT_COUNT conta(s) Qwen já cadastrada(s)."
+
+  step "Validando conectividade das contas Qwen..."
+  TEST_OUTPUT=$(gqwen test 2>&1 || true)
+  [ -n "$TEST_OUTPUT" ] && printf '%s\n' "$TEST_OUTPUT"
+  VALID_ACCOUNT_COUNT=$(printf '%s\n' "$TEST_OUTPUT" | grep -E ' OK ' | wc -l | tr -d '[:space:]')
+
+  if [ "$VALID_ACCOUNT_COUNT" -gt 0 ]; then
+    ok "$VALID_ACCOUNT_COUNT conta(s) válida(s) para uso."
+  else
+    warn "Contas cadastradas, mas nenhuma respondeu com sucesso."
+  fi
+fi
+
+if [ "$ACCOUNT_COUNT" -eq 0 ] || [ "$VALID_ACCOUNT_COUNT" -eq 0 ]; then
   echo ""
-  warn "Nenhuma conta Qwen encontrada."
+  if [ "$ACCOUNT_COUNT" -eq 0 ]; then
+    warn "Nenhuma conta Qwen encontrada."
+  else
+    warn "Necessário renovar autenticação no Qwen."
+  fi
   echo ""
   echo -e "  ${CYAN}-------------------------------------------${NC}"
   echo -e "  ${YELLOW}Ação necessária: login no browser${NC}"
@@ -52,6 +70,18 @@ else
   echo -e "  ${CYAN}-------------------------------------------${NC}"
   echo ""
   gqwen add
+
+  step "Validando nova autenticação..."
+  TEST_OUTPUT=$(gqwen test 2>&1 || true)
+  [ -n "$TEST_OUTPUT" ] && printf '%s\n' "$TEST_OUTPUT"
+  VALID_ACCOUNT_COUNT=$(printf '%s\n' "$TEST_OUTPUT" | grep -E ' OK ' | wc -l | tr -d '[:space:]')
+
+  if [ "$VALID_ACCOUNT_COUNT" -eq 0 ]; then
+    err "Login concluído, mas nenhuma conta ficou válida."
+    exit 1
+  fi
+
+  ok "$VALID_ACCOUNT_COUNT conta(s) válida(s) para uso."
 fi
 
 # -------------------------------------------
