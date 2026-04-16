@@ -165,8 +165,12 @@ function Invoke-NativeInteractive {
     $oldErrorActionPreference = $ErrorActionPreference
     try {
         $ErrorActionPreference = 'Continue'
-        & cmd.exe /d /s /c "$CommandLine 2>&1"
-        return $LASTEXITCODE
+        & cmd.exe /d /s /c "$CommandLine 2>&1" | ForEach-Object {
+            Write-Host $_
+        }
+        $exitCode = $LASTEXITCODE
+        if ($null -eq $exitCode) { $exitCode = 0 }
+        return [int]$exitCode
     } finally {
         $ErrorActionPreference = $oldErrorActionPreference
     }
@@ -312,24 +316,48 @@ if (-not $bunInstalled) {
 # -------------------------------------------------------
 # 5. Instalar gqwen-auth
 # -------------------------------------------------------
-Write-Step "Instalando gqwen-auth..."
-bun install -g gqwen-auth
-if ($LASTEXITCODE -ne 0) {
-    Write-Err "Falha ao instalar gqwen-auth."
-    exit 1
+Write-Step "Verificando gqwen-auth..."
+$gqwenInstalled = $false
+try {
+    $gqwenVersion = gqwen --version 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        $gqwenInstalled = $true
+        Write-Ok "gqwen-auth ja instalado: $gqwenVersion"
+    }
+} catch { $gqwenInstalled = $false }
+
+if (-not $gqwenInstalled) {
+    Write-Warn "Instalando gqwen-auth..."
+    bun install -g gqwen-auth
+    if ($LASTEXITCODE -ne 0) {
+        Write-Err "Falha ao instalar gqwen-auth."
+        exit 1
+    }
+    Write-Ok "gqwen-auth instalado."
 }
-Write-Ok "gqwen-auth instalado."
 
 # -------------------------------------------------------
 # 6. Instalar OpenClaude
 # -------------------------------------------------------
-Write-Step "Instalando OpenClaude..."
-npm install -g @gitlawb/openclaude
-if ($LASTEXITCODE -ne 0) {
-    Write-Err "Falha ao instalar OpenClaude."
-    exit 1
+Write-Step "Verificando OpenClaude..."
+$openClaudeInstalled = $false
+try {
+    $openClaudeVersion = openclaude --version 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        $openClaudeInstalled = $true
+        Write-Ok "OpenClaude ja instalado: $openClaudeVersion"
+    }
+} catch { $openClaudeInstalled = $false }
+
+if (-not $openClaudeInstalled) {
+    Write-Warn "Instalando OpenClaude..."
+    npm install -g @gitlawb/openclaude
+    if ($LASTEXITCODE -ne 0) {
+        Write-Err "Falha ao instalar OpenClaude."
+        exit 1
+    }
+    Write-Ok "OpenClaude instalado."
 }
-Write-Ok "OpenClaude instalado."
 
 # -------------------------------------------------------
 # 6b. Patch gqwen-auth

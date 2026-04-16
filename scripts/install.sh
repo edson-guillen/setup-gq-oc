@@ -139,28 +139,38 @@ fi
 # -------------------------------------------
 # 5. gqwen-auth
 # -------------------------------------------
-step "Instalando gqwen-auth..."
-bun install -g gqwen-auth
-ok "gqwen-auth instalado."
+step "Verificando gqwen-auth..."
+if command -v gqwen &>/dev/null; then
+  ok "gqwen-auth ja instalado: $(gqwen --version 2>/dev/null || echo encontrado)"
+else
+  warn "Instalando gqwen-auth..."
+  bun install -g gqwen-auth
+  ok "gqwen-auth instalado."
+fi
 
 # -------------------------------------------
 # 6. OpenClaude
 # -------------------------------------------
-step "Instalando OpenClaude..."
-if npm list -g --depth=0 openclaude &>/dev/null; then
-  warn "Removendo pacote legado 'openclaude'..."
-  npm uninstall -g openclaude 2>/dev/null || sudo npm uninstall -g openclaude 2>/dev/null || true
-fi
+step "Verificando OpenClaude..."
+if command -v openclaude &>/dev/null; then
+  ok "OpenClaude ja instalado: $(openclaude --version 2>/dev/null || echo encontrado)"
+else
+  if npm list -g --depth=0 openclaude &>/dev/null; then
+    warn "Removendo pacote legado 'openclaude'..."
+    npm uninstall -g openclaude 2>/dev/null || sudo npm uninstall -g openclaude 2>/dev/null || true
+  fi
 
-if ! npm install -g "$OPENCLAUDE_PACKAGE" 2>/dev/null; then
-  warn "Tentando com sudo..."
-  sudo npm install -g "$OPENCLAUDE_PACKAGE"
+  warn "Instalando OpenClaude..."
+  if ! npm install -g "$OPENCLAUDE_PACKAGE" 2>/dev/null; then
+    warn "Tentando com sudo..."
+    sudo npm install -g "$OPENCLAUDE_PACKAGE"
+  fi
+  if ! command -v openclaude &>/dev/null; then
+    err "OpenClaude nao encontrado apos instalacao."
+    exit 1
+  fi
+  ok "OpenClaude instalado."
 fi
-if ! command -v openclaude &>/dev/null; then
-  err "OpenClaude nao encontrado apos instalacao."
-  exit 1
-fi
-ok "OpenClaude instalado."
 
 # -------------------------------------------
 # 7. Repositório local
